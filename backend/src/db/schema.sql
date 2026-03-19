@@ -19,6 +19,19 @@ CREATE TYPE user_status AS ENUM ('active', 'suspended', 'banned');
 CREATE TYPE subscription_status AS ENUM ('free', 'premium', 'expired');
 
 -- ══════════════════════════════════════════════
+-- FONCTION : mise à jour automatique de updated_at
+-- (déclarée en premier car les triggers ci-dessous en dépendent)
+-- ══════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ══════════════════════════════════════════════
 -- APP FLAVORS (configuration par app gérée depuis l'admin)
 -- ══════════════════════════════════════════════
 
@@ -110,6 +123,7 @@ CREATE TABLE categories (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name            VARCHAR(100) NOT NULL,
     slug            VARCHAR(100) UNIQUE NOT NULL,
+    parent_id       UUID REFERENCES categories(id) ON DELETE CASCADE,  -- NULL = racine, rempli = sous-catégorie
     description     TEXT,
     icon_name       VARCHAR(50) NOT NULL,        -- nom de l'icône statique Flutter
     color           VARCHAR(7) NOT NULL,          -- hex color (#1B4332)
@@ -127,6 +141,7 @@ CREATE TABLE categories (
 );
 
 CREATE INDEX idx_categories_slug ON categories(slug);
+CREATE INDEX idx_categories_parent ON categories(parent_id);
 CREATE INDEX idx_categories_active ON categories(is_active, sort_order);
 
 -- ══════════════════════════════════════════════
@@ -356,16 +371,8 @@ CREATE TABLE admin_sessions (
 CREATE INDEX idx_admin_sessions_token ON admin_sessions(token);
 
 -- ══════════════════════════════════════════════
--- FONCTION : mise à jour automatique de updated_at
+-- TRIGGERS updated_at
 -- ══════════════════════════════════════════════
-
-CREATE OR REPLACE FUNCTION update_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_users_updated_at
     BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at();

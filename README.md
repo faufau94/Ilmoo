@@ -81,4 +81,4 @@ Les deux apps partagent le même code, la même API et la même base de données
 
 ## Licence
 
-Propriétaire — tous droits réservés.
+Propriétaire - tous droits réservés.

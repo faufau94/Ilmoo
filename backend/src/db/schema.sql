@@ -93,6 +93,7 @@ CREATE TABLE users (
     subscription    subscription_status DEFAULT 'free',
     is_anonymous    BOOLEAN DEFAULT true,          -- true = compte guest, false = lié Google/email
     app_flavor      VARCHAR(50),                   -- 'quizdeen' ou 'quizapp' (premier lancement)
+    fcm_token       VARCHAR(500),                  -- Firebase Cloud Messaging token
 
     -- Stats globales (dénormalisées pour perf)
     total_matches   INTEGER DEFAULT 0,

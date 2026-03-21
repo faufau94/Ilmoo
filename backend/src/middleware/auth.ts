@@ -36,9 +36,9 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.decorateRequest('user', null as unknown as UserRow);
 
   fastify.addHook('onRequest', async (request, reply) => {
-    // Skip public routes
-    const url = request.url;
-    if (url === '/health' || url.startsWith('/api/config/')) {
+    // Skip public routes (match on Fastify route pattern, not raw URL)
+    const routePath = request.routeOptions.url;
+    if (routePath === '/health' || routePath === '/api/config/:flavorSlug') {
       return;
     }
 
@@ -85,6 +85,20 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         'UPDATE users SET last_login_at = NOW() WHERE id = $1',
         [user.id],
       );
+    }
+
+    // Block banned/suspended accounts
+    if (user!.status === 'banned') {
+      return reply.status(403).send({
+        success: false,
+        error: 'Account banned',
+      });
+    }
+    if (user!.status === 'suspended') {
+      return reply.status(403).send({
+        success: false,
+        error: 'Account suspended',
+      });
     }
 
     request.user = user!;

@@ -4,8 +4,8 @@ const pool = new Pool({
   connectionString: process.env['DATABASE_URL'],
 });
 
-pool.on('error', (err) => {
-  console.error('Unexpected PostgreSQL client error:', err);
+pool.on('error', () => {
+  process.stderr.write('Unexpected PostgreSQL client error\n');
   process.exit(1);
 });
 

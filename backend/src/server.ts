@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
 import { Server as SocketIOServer } from 'socket.io';
@@ -8,14 +9,36 @@ import path from 'node:path';
 import { readdir } from 'node:fs/promises';
 import pool from './db/connection.js';
 import redis, { cacheFlavorConfig, getFlavorConfig } from './services/redis.js';
+import { verifyToken } from './services/firebase.js';
 import authPlugin from './middleware/auth.js';
+
+// ── CORS origins (restrict in production) ──
+const corsOrigin =
+  process.env['NODE_ENV'] === 'production'
+    ? ['https://admin.ilmoo.com']
+    : true; // reflect request origin in dev
 
 // ── Fastify instance ──
 const fastify = Fastify({ logger: true });
 
 // ── Socket.io ──
 const io = new SocketIOServer(fastify.server, {
-  cors: { origin: '*' },
+  cors: { origin: corsOrigin },
+});
+
+// Socket.io auth — verify Firebase token at handshake
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth?.['token'] as string | undefined;
+  if (!token) {
+    return next(new Error('Authentication required'));
+  }
+  try {
+    const decoded = await verifyToken(token);
+    socket.data['firebaseUid'] = decoded.uid;
+    next();
+  } catch {
+    next(new Error('Invalid or expired token'));
+  }
 });
 
 // Expose db, redis, io on fastify instance via decorators
@@ -24,7 +47,14 @@ fastify.decorate('redis', redis);
 fastify.decorate('io', io);
 
 // ── CORS ──
-await fastify.register(cors, { origin: '*' });
+await fastify.register(cors, { origin: corsOrigin });
+
+// ── Rate limiting (global: 100 req/min) ──
+await fastify.register(rateLimit, {
+  max: 100,
+  timeWindow: '1 minute',
+  redis,
+});
 
 // ── Auth (Firebase token verification + user upsert) ──
 await fastify.register(authPlugin);
@@ -37,6 +67,22 @@ fastify.get('/health', async () => {
 // ── GET /api/config/:flavorSlug (public, no auth) ──
 fastify.get<{ Params: { flavorSlug: string } }>(
   '/api/config/:flavorSlug',
+  {
+    schema: {
+      params: {
+        type: 'object' as const,
+        required: ['flavorSlug'],
+        properties: {
+          flavorSlug: {
+            type: 'string' as const,
+            minLength: 1,
+            maxLength: 50,
+            pattern: '^[a-z0-9_-]+$',
+          },
+        },
+      },
+    },
+  },
   async (request, reply) => {
     const { flavorSlug } = request.params;
 

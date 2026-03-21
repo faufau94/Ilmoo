@@ -5,6 +5,7 @@ import '../config/app_config.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import 'login_screen.dart';
+import 'category_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -163,7 +164,7 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: Icon(Icons.sports_esports_rounded),
           label: 'Match',
         ),
-        body: const _PlaceholderPage(title: 'Match'),
+        body: const CategoryScreen(),
       ),
       _Tab(
         navItem: const BottomNavigationBarItem(

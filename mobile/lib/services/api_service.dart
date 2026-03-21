@@ -47,6 +47,35 @@ class ApiService {
     return null;
   }
 
+  // ── Categories ──
+
+  Future<List<Map<String, dynamic>>> getCategories() async {
+    return _getList('/api/categories');
+  }
+
+  Future<Map<String, dynamic>?> getCategoryDetail(String slug) async {
+    return _get('/api/categories/$slug');
+  }
+
+  Future<List<Map<String, dynamic>>> getSubcategories(String slug) async {
+    return _getList('/api/categories/$slug/subcategories');
+  }
+
+  // ── Questions ──
+
+  Future<List<Map<String, dynamic>>> getRandomQuestions(
+    String categoryId, {
+    int count = 7,
+  }) async {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    final params = <String, String>{
+      'categoryId': categoryId,
+      'count': count.toString(),
+    };
+    if (userId != null) params['userId'] = userId;
+    return _getList('/api/questions/random', queryParams: params);
+  }
+
   // ── Auth ──
 
   Future<Map<String, dynamic>?> linkAccount({
@@ -74,6 +103,23 @@ class ApiService {
       }
     } catch (_) {}
     return null;
+  }
+
+  Future<List<Map<String, dynamic>>> _getList(
+    String path, {
+    Map<String, String>? queryParams,
+  }) async {
+    try {
+      final uri = Uri.parse('$_baseUrl$path').replace(queryParameters: queryParams);
+      final response = await _client.get(uri, headers: await _headers());
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        if (body['success'] == true && body['data'] is List) {
+          return (body['data'] as List).cast<Map<String, dynamic>>();
+        }
+      }
+    } catch (_) {}
+    return [];
   }
 
   Future<Map<String, dynamic>?> _post(

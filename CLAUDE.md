@@ -508,6 +508,7 @@ Client → Serveur :
   join_queue      { categoryId }
   leave_queue     {}
   answer          { roundNumber, answerIndex, timeMs }
+  rejoin_match    { matchId }                    # demande à rejoindre un match en cours après reconnexion
 
 Serveur → Client :
   queue_joined    { categoryId, position }
@@ -515,11 +516,39 @@ Serveur → Client :
   round_start     { roundNumber, question: { id, text, answers[] }, isBonus, timeLimit }
   round_result    { roundNumber, correctIndex, p1: { answerIndex, correct, points, total }, p2: {...} }
   match_end       { winnerId, p1Score, p2Score, xpGained, newLevel?, newBadge? }
-  opponent_disconnected  { timeout: 30 }
+  opponent_disconnected  { timeout: 30 }         # l'adversaire s'est déco, timer de grâce lancé
+  opponent_reconnected   {}                      # l'adversaire est revenu
+  match_rejoin    { matchId, currentRound, scores, opponent, question?, timeRemaining? }  # état complet pour le joueur qui revient
   queue_timeout   {}
   error           { message, code }
 ```
 Note : timeLimit dans round_start vient de config.timerSeconds * 1000.
+
+## Gestion des reconnexions (Socket.io)
+- Socket.io se reconnecte automatiquement côté client (backoff exponentiel, activé par défaut)
+- À la reconnexion, le client s'authentifie à nouveau (token Firebase dans les headers)
+- Le serveur identifie le joueur par son user ID (pas par son socket ID)
+- Si le joueur a un match en cours en base (status = in_progress) :
+  1. Le serveur le remet dans la room Socket.io du match
+  2. Émet "match_rejoin" avec l'état complet : round actuel, scores, adversaire, question en cours, temps restant
+  3. Émet "opponent_reconnected" à l'autre joueur
+  4. Annule le timer de forfait
+- Si le joueur était en queue de matchmaking :
+  1. Le serveur le remet dans la queue
+  2. Émet "queue_joined"
+
+## Gestion des déconnexions pendant un match
+- Quand un joueur se déconnecte (événement "disconnect") :
+  1. Émet "opponent_disconnected" { timeout: 30 } à l'autre joueur
+  2. Lance un timer de grâce (30 secondes)
+  3. Pendant le round en cours : le joueur déco score 0 pour ce round
+  4. Si le joueur revient avant la fin du timer → reprise normale
+  5. Si le timer expire → forfait, l'autre joueur gagne, match sauvegardé en base
+- Causes de déconnexion gérées :
+  - Perte réseau temporaire (wifi → 4G)
+  - App mise en arrière-plan (iOS/Android coupent le WebSocket)
+  - Fermeture volontaire de l'app
+  - Crash de l'app
 
 ## Routes API complètes
 ```

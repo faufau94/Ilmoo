@@ -303,7 +303,7 @@ class _MatchScreenState extends State<MatchScreen>
                   child: ListView.separated(
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: question.answers.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    separatorBuilder: (context, index) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       return _AnswerButton(
                         config: _config,

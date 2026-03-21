@@ -33,11 +33,15 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _bootstrap() async {
     final authService = context.read<AuthService>();
 
-    // Check if a Firebase user already exists
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      // First launch — sign in anonymously
-      await authService.signInAnonymous();
+    try {
+      // Check if a Firebase user already exists
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        // First launch — sign in anonymously
+        await authService.signInAnonymous();
+      }
+    } catch (e) {
+      debugPrint('Auth bootstrap failed: $e');
     }
 
     // Let the animation play for at least 1.5s

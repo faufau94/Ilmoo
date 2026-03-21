@@ -2,17 +2,16 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import type { Pool } from 'pg';
-import { Redis } from 'ioredis';
+import type { Redis } from 'ioredis';
 import { Server as SocketIOServer } from 'socket.io';
 import path from 'node:path';
 import { readdir } from 'node:fs/promises';
 import pool from './db/connection.js';
+import redis, { cacheFlavorConfig, getFlavorConfig } from './services/redis.js';
+import authPlugin from './middleware/auth.js';
 
 // ── Fastify instance ──
 const fastify = Fastify({ logger: true });
-
-// ── Redis ──
-const redis = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379');
 
 // ── Socket.io ──
 const io = new SocketIOServer(fastify.server, {
@@ -27,6 +26,9 @@ fastify.decorate('io', io);
 // ── CORS ──
 await fastify.register(cors, { origin: '*' });
 
+// ── Auth (Firebase token verification + user upsert) ──
+await fastify.register(authPlugin);
+
 // ── Health check ──
 fastify.get('/health', async () => {
   return { status: 'ok' };
@@ -39,10 +41,9 @@ fastify.get<{ Params: { flavorSlug: string } }>(
     const { flavorSlug } = request.params;
 
     // Check Redis cache first
-    const cacheKey = `config:${flavorSlug}`;
-    const cached = await redis.get(cacheKey);
+    const cached = await getFlavorConfig(flavorSlug);
     if (cached) {
-      return { success: true, data: JSON.parse(cached) };
+      return { success: true, data: cached };
     }
 
     // Query database
@@ -88,7 +89,7 @@ fastify.get<{ Params: { flavorSlug: string } }>(
     };
 
     // Cache in Redis for 5 minutes
-    await redis.set(cacheKey, JSON.stringify(data), 'EX', 300);
+    await cacheFlavorConfig(flavorSlug, data);
 
     return { success: true, data };
   },

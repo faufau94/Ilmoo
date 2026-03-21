@@ -46,15 +46,17 @@ ilmoo/
 │   │   │   └── events.ts      # Définition des événements WS
 │   │   ├── middleware/
 │   │   │   ├── auth.ts        # Vérification Firebase token
-│   │   │   └── admin.ts       # Middleware admin only
+│   │   │   ├── admin.ts       # Middleware admin only
+│   │   │   └── requireLinked.ts # Bloque les comptes anonymes sur les routes sensibles
 │   │   ├── db/
 │   │   │   ├── schema.sql     # Schéma PostgreSQL complet
 │   │   │   ├── seed.sql       # Données initiales (catégories, questions de test)
 │   │   │   └── queries.ts     # Requêtes SQL préparées
 │   │   ├── services/
-│   │   │   ├── redis.ts       # Connexion + helpers Redis
+│   │   │   ├── redis.ts       # Connexion + helpers Redis (clés par flavor)
 │   │   │   ├── firebase.ts    # Firebase Admin SDK
-│   │   │   └── scoring.ts     # Calcul des scores, XP, niveaux
+│   │   │   ├── scoring.ts     # Calcul des scores, XP, niveaux, badges (séparé pour testabilité)
+│   │   │   └── subscription.ts # Limite quotidienne, vérif premium
 │   │   └── types/             # Types TypeScript partagés
 │   ├── Dockerfile
 │   └── package.json
@@ -78,9 +80,15 @@ ilmoo/
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── package.json
-├── mobile/            # App Flutter
+├── mobile/                ← App Flutter (2 flavors)
 │   ├── lib/
-│   │   ├── main.dart
+│   │   ├── config/
+│   │   │   ├── app_config.dart          # Modèle AppConfig + factory fromApi
+│   │   │   ├── ilmoo_defaults.dart      # Fallback flavor Ilmoo
+│   │   │   └── quizapp_defaults.dart    # Fallback flavor QuizBattle
+│   │   ├── main_ilmoo.dart             # Entry point flavor Ilmoo
+│   │   ├── main_quizapp.dart           # Entry point flavor QuizBattle
+│   │   ├── app.dart                    # Widget racine partagé (reçoit AppConfig)
 │   │   ├── screens/
 │   │   │   ├── splash_screen.dart
 │   │   │   ├── login_screen.dart
@@ -92,14 +100,14 @@ ilmoo/
 │   │   │   ├── leaderboard_screen.dart
 │   │   │   └── shop_screen.dart
 │   │   ├── services/
-│   │   │   ├── api_service.dart       # Client HTTP vers Fastify
+│   │   │   ├── api_service.dart       # Client HTTP (utilise config.apiBaseUrl + header X-App-Flavor)
 │   │   │   ├── socket_service.dart    # Client Socket.io
-│   │   │   ├── auth_service.dart      # Firebase Auth
+│   │   │   ├── auth_service.dart      # Firebase Auth (anonyme + liaison)
 │   │   │   └── notification_service.dart
 │   │   ├── models/
 │   │   ├── widgets/
 │   │   └── theme/
-│   │       └── app_theme.dart         # Thème vert foncé (voir Design)
+│   │       └── app_theme.dart         # Thème dynamique basé sur AppConfig
 │   └── pubspec.yaml
 ├── docker-compose.yml
 ├── .env.example
@@ -132,7 +140,7 @@ Réponse :
 {
   "success": true,
   "data": {
-    "appName": "QuizDeen",
+    "appName": "Ilmoo",
     "primaryColor": "#1B4332",
     "primaryDark": "#081C15",
     "accentPositive": "#52B788",
@@ -311,17 +319,17 @@ mobile/
 ├── lib/
 │   ├── config/
 │   │   ├── app_config.dart            # Modèle AppConfig + factory fromApi
-│   │   ├── ilmoo_defaults.dart        # Fallback flavor Ilmoo (islam + culture G)
-│   │   └── quizapp_defaults.dart      # Fallback flavor QuizBattle (culture G seule)
+│   │   ├── ilmoo_defaults.dart        # Fallback flavor Ilmoo
+│   │   └── quizapp_defaults.dart      # Fallback flavor QuizBattle
 │   ├── main_ilmoo.dart                # Entry point flavor Ilmoo
 │   ├── main_quizapp.dart              # Entry point flavor QuizBattle
 │   └── ...                            # tout le reste est partagé
 ├── android/app/src/
 │   ├── main/                          # code Android partagé
-│   ├── quizdeen/
-│   │   └── res/                       # icône + nom pour QuizDeen
+│   ├── ilmoo/
+│   │   └── res/                     # icône + nom pour Ilmoo
 │   │       ├── mipmap-*/ic_launcher.png
-│   │       └── values/strings.xml     # <string name="app_name">QuizDeen</string>
+│   │       └── values/strings.xml     # <string name="app_name">Ilmoo</string>
 │   └── quizapp/
 │       └── res/                       # icône + nom pour QuizBattle
 │           ├── mipmap-*/ic_launcher.png
@@ -379,9 +387,9 @@ Le backend peut lire le header pour des analytics séparées par flavor.
 - **Progression** : XP par match → niveaux. Badges par catégorie (Bronze, Argent, Or, Expert, Grand Maître)
 - **Classements** : global, par catégorie, hebdomadaire (reset chaque lundi), entre amis
 
-## Backoffice admin (React)
+## Backoffice admin (Vue 3 + shadcn-vue)
 - Sidebar navigation : Dashboard, Applications, Questions, Catégories, Utilisateurs, Matchs, Signalements, Tournois, Pubs/Abo, Paramètres
-- Dashboard : métriques (joueurs actifs, matchs aujourd'hui, questions totales, signalements), filtre par app (dropdown QuizDeen / QuizBattle / Toutes), table questions récentes, top catégories, signalements récents
+- Dashboard : métriques (joueurs actifs, matchs aujourd'hui, questions totales, signalements), filtre par app (dropdown Ilmoo / QuizBattle / Toutes), table questions récentes, top catégories, signalements récents
 - Applications : liste les deux flavors en cards. Cliquer ouvre un formulaire d'édition avec : nom, description, email support, couleurs (4 color pickers), catégories activées (checkboxes avec toutes les catégories), feature flags (toggles : pubs, premium, tournois, amis), gameplay (matchs/jour, rounds, timer, scoring, XP, badges), textes personnalisables, mode maintenance (toggle + message), version minimum, URLs stores
 - Gestion questions : CRUD complet, import JSON en masse, stats par question (fois jouée, taux de réussite), filtres par catégorie/sous-catégorie/difficulté
 - Gestion catégories : arbre parent/enfant, créer des racines et sous-catégories, réordonner, activer/désactiver, marquer premium
@@ -482,12 +490,16 @@ le client Flutter l'utilise pour le timer, le nombre de rounds, et les textes af
 - Les WebSocket vérifient aussi le token Firebase à la connexion (pas uniquement les routes HTTP)
 - Le header X-App-Flavor est lu mais jamais utilisé comme critère de sécurité (il peut être falsifié)
 - CORS configuré : en prod, origin restreint aux domaines autorisés uniquement
-- Queue key : `queue:{categoryId}` (Redis List)
+
+## Matchmaking (Redis)
+- Les deux apps ont des pools de joueurs SÉPARÉS (pas de cross-play)
+- Queue key : `queue:{flavorSlug}:{categoryId}` (Redis List) — le flavor isole les joueurs
 - Match session : `match:{matchId}` (Redis Hash avec questions, scores, état)
-- Leaderboard global : `leaderboard:global` (Redis Sorted Set, score = totalXP)
-- Leaderboard par catégorie : `leaderboard:cat:{categoryId}` (Sorted Set)
-- Leaderboard hebdo : `leaderboard:weekly` (Sorted Set, reset chaque lundi via cron)
-- Timeout matchmaking : 15 secondes
+- Leaderboard global : `leaderboard:{flavorSlug}:global` (Redis Sorted Set, score = totalXP)
+- Leaderboard par catégorie : `leaderboard:{flavorSlug}:cat:{categoryId}` (Sorted Set)
+- Leaderboard hebdo : `leaderboard:{flavorSlug}:weekly` (Sorted Set, reset chaque lundi via cron)
+- Config cache : `config:{flavorSlug}` (Redis String, TTL 5 min)
+- Timeout matchmaking : config.matchmakingTimeoutSeconds (défaut: 15s)
 - Anti-doublon : un joueur ne peut être que dans une seule queue à la fois
 
 ## Événements Socket.io
@@ -667,16 +679,16 @@ npm-debug.log*
 - Base de test : PostgreSQL séparé (DB ilmoo_test), créée et vidée avant chaque suite
 - Coverage minimum visé : 80% sur les services, 70% sur les routes
 - Commandes :
-  - `npm test` : lance tous les tests
-  - `npm run test:unit` : tests unitaires seulement
-  - `npm run test:integration` : tests d'intégration seulement
-  - `npm run test:coverage` : avec rapport de couverture
+  - `yarn test` : lance tous les tests
+  - `yarn test:unit` : tests unitaires seulement
+  - `yarn test:integration` : tests d'intégration seulement
+  - `yarn test:coverage` : avec rapport de couverture
 
 ### Admin (Vitest + Vue Test Utils)
 - Framework : Vitest + @vue/test-utils
 - Tests unitaires : composables (useAuth, useApi), utilitaires, formatters
 - Tests composants : pages principales (Dashboard, Questions, Applications) — vérifier le rendu, les interactions formulaire, les appels API mockés
-- Commandes : `npm test`, `npm run test:coverage`
+- Commandes : `yarn test`, `yarn test:coverage`
 
 ### Mobile (Flutter test)
 - Framework : flutter_test (inclus) + mocktail pour les mocks

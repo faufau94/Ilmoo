@@ -90,6 +90,10 @@ class AppTheme {
         hintStyle: TextStyle(color: Colors.white.withAlpha(100)),
       ),
 
+      // Disable ripple globally
+      splashFactory: NoSplash.splashFactory,
+      highlightColor: Colors.transparent,
+
       // Bottom nav
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: primaryDark,
@@ -97,6 +101,7 @@ class AppTheme {
         unselectedItemColor: Colors.white.withAlpha(120),
         type: BottomNavigationBarType.fixed,
         elevation: 0,
+        enableFeedback: false,
       ),
 
       // Dividers

@@ -175,6 +175,49 @@ CREATE INDEX idx_questions_difficulty ON questions(category_id, difficulty);
 CREATE INDEX idx_questions_active ON questions(is_active, is_verified);
 
 -- ══════════════════════════════════════════════
+-- TOURNOIS (avant matchs car matches référence tournaments)
+-- ══════════════════════════════════════════════
+
+CREATE TABLE tournaments (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name            VARCHAR(200) NOT NULL,
+    description     TEXT,
+    status          tournament_status DEFAULT 'draft',
+
+    -- Config
+    category_ids    UUID[] NOT NULL,
+    max_players     INTEGER,
+    rounds_per_match SMALLINT DEFAULT 7,
+
+    -- Timing
+    starts_at       TIMESTAMPTZ NOT NULL,
+    ends_at         TIMESTAMPTZ NOT NULL,
+
+    -- Sponsor (optionnel)
+    sponsor_name    VARCHAR(200),
+    sponsor_url     VARCHAR(500),
+
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_tournaments_status ON tournaments(status, starts_at);
+
+CREATE TABLE tournament_participants (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tournament_id   UUID NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    score           INTEGER DEFAULT 0,
+    matches_played  INTEGER DEFAULT 0,
+    matches_won     INTEGER DEFAULT 0,
+    joined_at       TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(tournament_id, user_id)
+);
+
+CREATE INDEX idx_tournament_participants_score ON tournament_participants(tournament_id, score DESC);
+
+-- ══════════════════════════════════════════════
 -- MATCHS
 -- ══════════════════════════════════════════════
 
@@ -300,49 +343,6 @@ CREATE TABLE reports (
 
 CREATE INDEX idx_reports_status ON reports(status, created_at DESC);
 CREATE INDEX idx_reports_question ON reports(question_id) WHERE question_id IS NOT NULL;
-
--- ══════════════════════════════════════════════
--- TOURNOIS
--- ══════════════════════════════════════════════
-
-CREATE TABLE tournaments (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name            VARCHAR(200) NOT NULL,
-    description     TEXT,
-    status          tournament_status DEFAULT 'draft',
-
-    -- Config
-    category_ids    UUID[] NOT NULL,              -- catégories autorisées
-    max_players     INTEGER,
-    rounds_per_match SMALLINT DEFAULT 7,
-
-    -- Timing
-    starts_at       TIMESTAMPTZ NOT NULL,
-    ends_at         TIMESTAMPTZ NOT NULL,
-
-    -- Sponsor (optionnel)
-    sponsor_name    VARCHAR(200),
-    sponsor_url     VARCHAR(500),
-
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_tournaments_status ON tournaments(status, starts_at);
-
-CREATE TABLE tournament_participants (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tournament_id   UUID NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
-    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    score           INTEGER DEFAULT 0,
-    matches_played  INTEGER DEFAULT 0,
-    matches_won     INTEGER DEFAULT 0,
-    joined_at       TIMESTAMPTZ DEFAULT NOW(),
-
-    UNIQUE(tournament_id, user_id)
-);
-
-CREATE INDEX idx_tournament_participants_score ON tournament_participants(tournament_id, score DESC);
 
 -- ══════════════════════════════════════════════
 -- QUESTIONS JOUÉES (évite les doublons pour un joueur)

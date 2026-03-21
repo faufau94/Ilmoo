@@ -20,14 +20,26 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.ilmoo.mobile"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    flavorDimensions += "app"
+
+    productFlavors {
+        create("ilmoo") {
+            dimension = "app"
+            applicationId = "com.ilmoo.app"
+            resValue("string", "app_name", "Ilmoo")
+        }
+        create("quizapp") {
+            dimension = "app"
+            applicationId = "com.quizbattle.app"
+            resValue("string", "app_name", "QuizBattle")
+        }
     }
 
     buildTypes {

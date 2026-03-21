@@ -16,5 +16,7 @@ export default defineConfig({
     },
     testTimeout: 15000,
     hookTimeout: 30000,
+    // Run test files sequentially — they share the same DB and Redis
+    fileParallelism: false,
   },
 });

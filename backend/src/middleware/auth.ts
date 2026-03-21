@@ -38,7 +38,7 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.addHook('onRequest', async (request, reply) => {
     // Skip public routes (match on Fastify route pattern, not raw URL)
     const routePath = request.routeOptions.url;
-    if (routePath === '/health' || routePath === '/api/config/:flavorSlug') {
+    if (routePath === '/health' || routePath === '/api/config/:flavorSlug' || routePath === '/api/admin/login') {
       return;
     }
 
@@ -52,39 +52,55 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
 
     const token = authHeader.slice(7);
 
-    let firebaseUid: string;
-    try {
-      const decoded = await verifyToken(token);
-      firebaseUid = decoded.uid;
-    } catch {
-      return reply.status(401).send({
-        success: false,
-        error: 'Invalid or expired token',
-      });
-    }
-
-    // Look up existing user
-    let user = await getOne<UserRow>(
-      'SELECT * FROM users WHERE firebase_uid = $1',
-      [firebaseUid],
+    // Try admin session token first (for backoffice)
+    const adminSession = await getOne<{ user_id: string }>(
+      `SELECT user_id FROM admin_sessions WHERE token = $1 AND expires_at > NOW()`,
+      [token],
     );
 
-    if (!user) {
-      // First connection — auto-create anonymous account
-      const appFlavor = (request.headers['x-app-flavor'] as string) || null;
+    let user: UserRow | null = null;
 
+    if (adminSession) {
+      // Admin session token — look up admin user
       user = await getOne<UserRow>(
-        `INSERT INTO users (firebase_uid, is_anonymous, app_flavor, last_login_at)
-         VALUES ($1, true, $2, NOW())
-         RETURNING *`,
-        [firebaseUid, appFlavor],
+        'SELECT * FROM users WHERE id = $1',
+        [adminSession.user_id],
       );
     } else {
-      // Update last_login_at
-      await getOne(
-        'UPDATE users SET last_login_at = NOW() WHERE id = $1',
-        [user.id],
+      // Firebase token — verify with Firebase Admin SDK
+      let firebaseUid: string;
+      try {
+        const decoded = await verifyToken(token);
+        firebaseUid = decoded.uid;
+      } catch {
+        return reply.status(401).send({
+          success: false,
+          error: 'Invalid or expired token',
+        });
+      }
+
+      user = await getOne<UserRow>(
+        'SELECT * FROM users WHERE firebase_uid = $1',
+        [firebaseUid],
       );
+
+      if (!user) {
+        // First connection — auto-create anonymous account
+        const appFlavor = (request.headers['x-app-flavor'] as string) || null;
+
+        user = await getOne<UserRow>(
+          `INSERT INTO users (firebase_uid, is_anonymous, app_flavor, last_login_at)
+           VALUES ($1, true, $2, NOW())
+           RETURNING *`,
+          [firebaseUid, appFlavor],
+        );
+      } else {
+        // Update last_login_at
+        await getOne(
+          'UPDATE users SET last_login_at = NOW() WHERE id = $1',
+          [user.id],
+        );
+      }
     }
 
     // Block banned/suspended accounts

@@ -105,6 +105,9 @@ CREATE TABLE users (
     daily_matches   INTEGER DEFAULT 0,
     last_match_date DATE,
 
+    -- Admin auth (only for admin users, null for players)
+    password_hash   VARCHAR(255),
+
     -- Timestamps
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW(),

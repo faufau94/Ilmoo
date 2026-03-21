@@ -42,32 +42,50 @@ cd admin && yarn install
 cd mobile && flutter pub get
 ```
 
-## Lancement (Docker)
+## Lancement
+
+### Mode dev (hot reload)
 
 ```bash
-cp .env.example .env
-# Éditer .env avec vos valeurs
-
-docker compose up -d
+cp .env.example .env  # première fois uniquement
+docker compose up -d --build
 ```
 
-- API : http://localhost:3000
-- Admin : http://localhost:3001
+Docker Compose charge automatiquement `docker-compose.yaml` + `docker-compose.override.yaml`.
+Les sources sont montées en volume : toute modification de fichier déclenche un rechargement automatique.
 
-## Lancement (dev local)
+| Service | URL | Hot reload |
+|---------|-----|------------|
+| API | http://localhost:3000 | tsx watch (redémarrage auto) |
+| Admin | http://localhost:3001 | Vite HMR (instantané) |
+| PostgreSQL | localhost:5432 | — |
+| Redis | localhost:6379 | — |
+
+### Mode prod (build optimisé)
 
 ```bash
-# Backend
-cd backend && yarn dev
+docker compose -f docker-compose.yaml up -d --build
+```
 
-# Admin
-cd admin && yarn dev
+En spécifiant uniquement `docker-compose.yaml`, l'override dev est ignoré.
+Utilise les Dockerfiles multi-stage (compilation TS + Nginx pour l'admin).
 
-# Mobile (flavor Ilmoo)
+### Mobile
+
+```bash
+# Flavor Ilmoo
 flutter run --flavor ilmoo -t lib/main_ilmoo.dart
 
-# Mobile (flavor QuizBattle)
+# Flavor QuizBattle
 flutter run --flavor quizapp -t lib/main_quizapp.dart
+```
+
+## Tests
+
+```bash
+cd backend && yarn test        # Backend (Vitest)
+cd admin && npx vitest run     # Admin (Vitest)
+cd mobile && flutter test      # Mobile (Flutter)
 ```
 
 ## Flavors

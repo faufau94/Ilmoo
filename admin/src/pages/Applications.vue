@@ -103,6 +103,26 @@ function deselectAllCats() {
   enabledCatIds.value = []
 }
 
+// ── Text keys ──
+const textKeys = [
+  'matchWin',
+  'matchLose',
+  'matchDraw',
+  'matchmakingSearching',
+  'matchmakingTimeout',
+  'dailyLimitReached',
+  'dailyLimitCta',
+  'linkAccountPrompt',
+  'linkAccountLeaderboard',
+  'linkAccountFriends',
+  'linkAccountProfile',
+  'maintenanceDefault',
+  'updateRequired',
+  'welcomeMessage',
+  'premiumCta',
+  'premiumDescription',
+]
+
 // ── Types ──
 interface FlavorRow {
   id: string
@@ -340,6 +360,132 @@ interface CategoryRow {
             <div class="flex items-center justify-between">
               <Label>Amis</Label>
               <Switch :model-value="(form.friends_enabled as boolean)" @update:model-value="form.friends_enabled = $event" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <!-- Gameplay -->
+        <Card>
+          <CardHeader>
+            <CardTitle class="flex items-center gap-2"><Gamepad2 class="h-4 w-4" /> Gameplay</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="space-y-2">
+                <Label>Matchs gratuits / jour</Label>
+                <Input type="number" :model-value="(form.free_daily_matches as number)" @update:model-value="form.free_daily_matches = Number($event)" min="1" />
+              </div>
+              <div class="space-y-2">
+                <Label>Rounds par match</Label>
+                <Input type="number" :model-value="(form.round_count as number)" @update:model-value="form.round_count = Number($event)" min="1" max="20" />
+              </div>
+              <div class="space-y-2">
+                <Label>Timer (secondes)</Label>
+                <Input type="number" :model-value="(form.timer_seconds as number)" @update:model-value="form.timer_seconds = Number($event)" min="5" max="60" />
+              </div>
+              <div class="space-y-2">
+                <Label>Timeout matchmaking (s)</Label>
+                <Input type="number" :model-value="(form.matchmaking_timeout_seconds as number)" @update:model-value="form.matchmaking_timeout_seconds = Number($event)" min="5" max="120" />
+              </div>
+            </div>
+            <div class="flex items-center justify-between mt-4">
+              <Label>Round bonus activé</Label>
+              <Switch :model-value="(form.bonus_round_enabled as boolean)" @update:model-value="form.bonus_round_enabled = $event" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <!-- Scoring -->
+        <Card>
+          <CardHeader>
+            <CardTitle class="flex items-center gap-2"><Trophy class="h-4 w-4" /> Scoring</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="space-y-2">
+                <Label>Points par round</Label>
+                <Input type="number" :model-value="(form.points_per_round as number)" @update:model-value="form.points_per_round = Number($event)" min="1" />
+              </div>
+              <div class="space-y-2">
+                <Label>Points round bonus</Label>
+                <Input type="number" :model-value="(form.points_bonus_round as number)" @update:model-value="form.points_bonus_round = Number($event)" min="1" />
+              </div>
+              <div class="space-y-2">
+                <Label>Poids vitesse (0-1)</Label>
+                <Input type="number" :model-value="(form.speed_weight as number)" @update:model-value="form.speed_weight = Number($event)" min="0" max="1" step="0.05" />
+              </div>
+              <div class="space-y-2">
+                <Label>Poids base (0-1)</Label>
+                <Input type="number" :model-value="(form.base_weight as number)" @update:model-value="form.base_weight = Number($event)" min="0" max="1" step="0.05" />
+              </div>
+              <div class="space-y-2">
+                <Label>Points minimum si correct</Label>
+                <Input type="number" :model-value="(form.min_correct_points as number)" @update:model-value="form.min_correct_points = Number($event)" min="0" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <!-- Progression -->
+        <Card>
+          <CardHeader>
+            <CardTitle>Progression</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="space-y-2">
+                <Label>XP base par match</Label>
+                <Input type="number" :model-value="(form.xp_base_match as number)" @update:model-value="form.xp_base_match = Number($event)" min="0" />
+              </div>
+              <div class="space-y-2">
+                <Label>XP bonus victoire</Label>
+                <Input type="number" :model-value="(form.xp_win_bonus as number)" @update:model-value="form.xp_win_bonus = Number($event)" min="0" />
+              </div>
+              <div class="space-y-2">
+                <Label>XP bonus perfect</Label>
+                <Input type="number" :model-value="(form.xp_perfect_bonus as number)" @update:model-value="form.xp_perfect_bonus = Number($event)" min="0" />
+              </div>
+              <div class="space-y-2">
+                <Label>Multiplicateur streak</Label>
+                <Input type="number" :model-value="(form.xp_streak_multiplier as number)" @update:model-value="form.xp_streak_multiplier = Number($event)" min="0" />
+              </div>
+              <div class="space-y-2">
+                <Label>Diviseur niveau</Label>
+                <Input type="number" :model-value="(form.level_formula_divisor as number)" @update:model-value="form.level_formula_divisor = Number($event)" min="1" />
+              </div>
+            </div>
+            <Separator class="my-4" />
+            <p class="text-sm font-medium mb-3">Seuils de badges (XP par catégorie)</p>
+            <div class="grid grid-cols-5 gap-3">
+              <div v-for="tier in ['bronze', 'silver', 'gold', 'expert', 'grand_master']" :key="tier" class="space-y-1">
+                <Label class="text-xs capitalize">{{ tier.replace('_', ' ') }}</Label>
+                <Input
+                  type="number"
+                  :model-value="(form.badge_thresholds as Record<string, number>)?.[tier]"
+                  @update:model-value="((form.badge_thresholds as Record<string, number>) ??= {})[tier] = Number($event)"
+                  min="0"
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <!-- Textes -->
+        <Card>
+          <CardHeader>
+            <CardTitle class="flex items-center gap-2"><Type class="h-4 w-4" /> Textes personnalisables</CardTitle>
+          </CardHeader>
+          <CardContent class="space-y-3">
+            <div
+              v-for="key in textKeys"
+              :key="key"
+              class="space-y-1"
+            >
+              <Label class="text-xs text-muted-foreground">{{ key }}</Label>
+              <Input
+                :model-value="(form.custom_texts as Record<string, string>)?.[key] ?? ''"
+                @update:model-value="((form.custom_texts as Record<string, string>) ??= {})[key] = ($event as string)"
+              />
             </div>
           </CardContent>
         </Card>

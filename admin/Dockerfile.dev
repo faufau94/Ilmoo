@@ -1,0 +1,13 @@
+FROM node:20-alpine
+RUN corepack enable
+WORKDIR /app
+
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile
+
+COPY . .
+
+EXPOSE 80
+
+# Vite dev server with HMR, accessible from host
+CMD ["yarn", "dev", "--host", "0.0.0.0", "--port", "80"]

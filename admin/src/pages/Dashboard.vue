@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { getStats, getQuestions, getReports } from '@/lib/api'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Card,
+  CardAction,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+  CardContent,
+} from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
   Table,
@@ -21,11 +29,11 @@ import {
 } from '@/components/ui/select'
 import { Users, Swords, HelpCircle, Flag } from 'lucide-vue-next'
 
-const flavorFilter = ref<string>('')
+const flavorFilter = ref<string>('all')
 
 const { data: statsData } = useQuery({
   queryKey: ['stats', flavorFilter],
-  queryFn: () => getStats(flavorFilter.value || undefined),
+  queryFn: () => getStats(flavorFilter.value === 'all' ? undefined : flavorFilter.value),
 })
 
 const { data: questionsData } = useQuery({
@@ -42,16 +50,14 @@ const stats = computed(() => statsData.value?.data)
 const questions = computed(() => questionsData.value?.data ?? [])
 const reports = computed(() => reportsData.value?.data ?? [])
 
-import { computed } from 'vue'
-
 const metricCards = computed(() => {
   const s = stats.value
   if (!s) return []
   return [
-    { label: 'Joueurs actifs', value: s.activeToday, total: s.totalUsers, icon: Users, color: 'text-blue-500' },
-    { label: 'Matchs aujourd\'hui', value: s.matchesToday, total: s.totalMatches, icon: Swords, color: 'text-green-500' },
-    { label: 'Questions', value: s.totalQuestions, icon: HelpCircle, color: 'text-purple-500' },
-    { label: 'Signalements', value: s.pendingReports, icon: Flag, color: 'text-orange-500' },
+    { label: 'Joueurs actifs', value: s.activeToday, subtitle: `${s.totalUsers} au total`, icon: Users },
+    { label: 'Matchs aujourd\'hui', value: s.matchesToday, subtitle: `${s.totalMatches} au total`, icon: Swords },
+    { label: 'Questions', value: s.totalQuestions, subtitle: 'Questions actives', icon: HelpCircle },
+    { label: 'Signalements', value: s.pendingReports, subtitle: 'En attente de traitement', icon: Flag },
   ]
 })
 
@@ -59,6 +65,12 @@ function difficultyColor(d: string) {
   if (d === 'easy') return 'bg-green-500/10 text-green-500'
   if (d === 'hard') return 'bg-red-500/10 text-red-500'
   return 'bg-yellow-500/10 text-yellow-500'
+}
+
+function difficultyLabel(d: string) {
+  if (d === 'easy') return 'Facile'
+  if (d === 'hard') return 'Difficile'
+  return 'Moyen'
 }
 
 function successRate(played: number, correct: number) {
@@ -80,7 +92,7 @@ function successRate(played: number, correct: number) {
           <SelectValue placeholder="Toutes les apps" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">Toutes les apps</SelectItem>
+          <SelectItem value="all">Toutes les apps</SelectItem>
           <SelectItem value="ilmoo">Ilmoo</SelectItem>
           <SelectItem value="quizapp">QuizBattle</SelectItem>
         </SelectContent>
@@ -88,22 +100,24 @@ function successRate(played: number, correct: number) {
     </div>
 
     <!-- Metric cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <Card v-for="card in metricCards" :key="card.label">
-        <CardContent class="pt-6">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-muted-foreground">{{ card.label }}</p>
-              <p class="text-3xl font-bold mt-1">{{ card.value ?? '–' }}</p>
-              <p v-if="card.total !== undefined" class="text-xs text-muted-foreground mt-1">
-                {{ card.total }} au total
-              </p>
-            </div>
-            <div :class="['rounded-lg p-3 bg-muted', card.color]">
-              <component :is="card.icon" class="h-5 w-5" />
-            </div>
+    <div class="grid grid-cols-1 gap-4 *:data-[slot=card]:shadow-xs sm:grid-cols-2 lg:grid-cols-4">
+      <Card v-for="card in metricCards" :key="card.label" class="@container/card">
+        <CardHeader>
+          <CardDescription>{{ card.label }}</CardDescription>
+          <CardTitle class="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+            {{ card.value ?? '–' }}
+          </CardTitle>
+          <CardAction>
+            <Badge variant="outline">
+              <component :is="card.icon" class="size-3" />
+            </Badge>
+          </CardAction>
+        </CardHeader>
+        <CardFooter class="flex-col items-start gap-1.5 text-sm">
+          <div class="text-muted-foreground">
+            {{ card.subtitle }}
           </div>
-        </CardContent>
+        </CardFooter>
       </Card>
     </div>
 
@@ -125,7 +139,7 @@ function successRate(played: number, correct: number) {
             </TableHeader>
             <TableBody>
               <TableRow v-for="q in questions" :key="(q as any).id">
-                <TableCell class="max-w-[200px] truncate">
+                <TableCell class="max-w-50 truncate">
                   {{ (q as any).question_text }}
                 </TableCell>
                 <TableCell>
@@ -136,7 +150,7 @@ function successRate(played: number, correct: number) {
                     class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
                     :class="difficultyColor((q as any).difficulty)"
                   >
-                    {{ (q as any).difficulty }}
+                    {{ difficultyLabel((q as any).difficulty) }}
                   </span>
                 </TableCell>
                 <TableCell class="text-right">

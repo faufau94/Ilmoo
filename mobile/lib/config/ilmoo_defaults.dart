@@ -8,7 +8,8 @@ class IlmooDefaults {
     appName: 'Ilmoo',
     appId: 'com.ilmoo.app',
     flavorSlug: 'ilmoo',
-    apiBaseUrl: 'https://api.ilmoo.com',
+    // 10.0.2.2 = host machine from Android emulator, change to production URL for release
+    apiBaseUrl: 'http://10.0.2.2:3000',
     primaryColor: Color(0xFF1B4332),
     primaryDark: Color(0xFF081C15),
     accentPositive: Color(0xFF52B788),

@@ -37,7 +37,6 @@ class _SplashScreenState extends State<SplashScreen>
       // Check if a Firebase user already exists
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        // First launch — sign in anonymously
         await authService.signInAnonymous();
       }
     } catch (e) {

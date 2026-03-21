@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 import {
@@ -13,6 +13,8 @@ import {
   Trophy,
   Settings,
   LogOut,
+  Moon,
+  Sun,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -20,6 +22,20 @@ const router = useRouter()
 const { isAuthenticated, logout } = useAuth()
 
 const showSidebar = computed(() => isAuthenticated.value && route.name !== 'login')
+
+const isDark = ref(false)
+
+onMounted(() => {
+  isDark.value = document.documentElement.classList.contains('dark')
+    || localStorage.getItem('theme') === 'dark'
+  if (isDark.value) document.documentElement.classList.add('dark')
+})
+
+function toggleDarkMode() {
+  isDark.value = !isDark.value
+  document.documentElement.classList.toggle('dark', isDark.value)
+  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
+}
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -70,8 +86,16 @@ function handleLogout() {
         </RouterLink>
       </nav>
 
-      <!-- Logout -->
-      <div class="p-3 border-t border-border">
+      <!-- Bottom actions -->
+      <div class="p-3 border-t border-border space-y-1">
+        <button
+          class="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          @click="toggleDarkMode"
+        >
+          <Sun v-if="isDark" class="h-4 w-4" />
+          <Moon v-else class="h-4 w-4" />
+          {{ isDark ? 'Mode clair' : 'Mode sombre' }}
+        </button>
         <button
           class="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
           @click="handleLogout"

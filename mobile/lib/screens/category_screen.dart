@@ -47,6 +47,13 @@ class _CategoryScreenState extends State<CategoryScreen> {
           builder: (_) => _SubcategoryScreen(parent: category),
         ),
       );
+    } else if (category.questionCount == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Pas encore de questions dans cette catégorie'),
+          backgroundColor: context.read<AppConfig>().accentNegative,
+        ),
+      );
     } else {
       _startMatch(category);
     }
@@ -252,7 +259,16 @@ class _SubcategoryScreenState extends State<_SubcategoryScreen> {
     }
   }
 
-  void _startMatch(String categoryId, String categoryName) {
+  void _startMatch(String categoryId, String categoryName, {int questionCount = -1}) {
+    if (questionCount == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Pas encore de questions dans cette catégorie'),
+          backgroundColor: context.read<AppConfig>().accentNegative,
+        ),
+      );
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => MatchScreen(
@@ -343,7 +359,7 @@ class _SubcategoryScreenState extends State<_SubcategoryScreen> {
                         itemBuilder: (context, index) {
                           final sub = _subcategories[index];
                           return GestureDetector(
-                            onTap: () => _startMatch(sub.id, sub.name),
+                            onTap: () => _startMatch(sub.id, sub.name, questionCount: sub.questionCount),
                             child: Container(
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(

@@ -1,4 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
+import bcrypt from 'bcrypt';
+import crypto from 'node:crypto';
 import { query, getOne } from '../db/queries.js';
 import { requireAdmin } from '../middleware/admin.js';
 import redis from '../services/redis.js';
@@ -13,13 +15,73 @@ interface AdminStatsRow {
 }
 
 const adminRoutes: FastifyPluginAsync = async (fastify) => {
-  // All admin routes require admin role
-  fastify.addHook('preHandler', requireAdmin);
+  // ════════════════════════════════════════
+  // POST /api/admin/login — public (no auth, no requireAdmin)
+  // Registered directly on the parent instance to avoid the preHandler hook below
+  // ════════════════════════════════════════
+  fastify.post<{ Body: { email: string; password: string } }>(
+    '/api/admin/login',
+    {
+      schema: {
+        body: {
+          type: 'object' as const,
+          required: ['email', 'password'],
+          properties: {
+            email: { type: 'string', format: 'email' },
+            password: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { email, password } = request.body;
+
+      const user = await getOne<{
+        id: string;
+        email: string;
+        username: string | null;
+        role: string;
+        password_hash: string | null;
+      }>(
+        `SELECT id, email, username, role, password_hash FROM users WHERE email = $1 AND role = 'admin'`,
+        [email],
+      );
+
+      if (!user || !user.password_hash) {
+        return reply.status(401).send({ success: false, error: 'Email ou mot de passe incorrect' });
+      }
+
+      const valid = await bcrypt.compare(password, user.password_hash);
+      if (!valid) {
+        return reply.status(401).send({ success: false, error: 'Email ou mot de passe incorrect' });
+      }
+
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+      await query(
+        `INSERT INTO admin_sessions (user_id, token, expires_at) VALUES ($1, $2, $3)`,
+        [user.id, token, expiresAt],
+      );
+
+      return {
+        success: true,
+        data: {
+          token,
+          user: { id: user.id, email: user.email, username: user.username },
+        },
+      };
+    },
+  );
+
+  // ── Protected admin routes (encapsulated in a sub-plugin) ──
+  await fastify.register(async (f) => {
+    f.addHook('preHandler', requireAdmin);
 
   // ════════════════════════════════════════
   // GET /api/admin/stats — dashboard metrics
   // ════════════════════════════════════════
-  fastify.get<{ Querystring: { flavor?: string } }>(
+  f.get<{ Querystring: { flavor?: string } }>(
     '/api/admin/stats',
     {
       schema: {
@@ -67,7 +129,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // GET /api/admin/users — user list with filters
   // ════════════════════════════════════════
-  fastify.get<{
+  f.get<{
     Querystring: {
       status?: string;
       role?: string;
@@ -149,7 +211,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // PUT /api/admin/users/:id/status
   // ════════════════════════════════════════
-  fastify.put<{ Params: { id: string }; Body: { status: 'active' | 'suspended' | 'banned' } }>(
+  f.put<{ Params: { id: string }; Body: { status: 'active' | 'suspended' | 'banned' } }>(
     '/api/admin/users/:id/status',
     {
       schema: {
@@ -184,7 +246,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // GET /api/admin/reports — pending reports
   // ════════════════════════════════════════
-  fastify.get<{ Querystring: { status?: string; limit?: string; offset?: string } }>(
+  f.get<{ Querystring: { status?: string; limit?: string; offset?: string } }>(
     '/api/admin/reports',
     {
       schema: {
@@ -225,7 +287,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // PUT /api/admin/reports/:id — resolve report
   // ════════════════════════════════════════
-  fastify.put<{
+  f.put<{
     Params: { id: string };
     Body: { status: 'resolved' | 'rejected'; admin_note?: string };
   }>(
@@ -267,7 +329,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // GET /api/admin/flavors — list all flavors
   // ════════════════════════════════════════
-  fastify.get('/api/admin/flavors', async () => {
+  f.get('/api/admin/flavors', async () => {
     const result = await query(
       `SELECT * FROM app_flavors ORDER BY slug`,
     );
@@ -277,7 +339,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // GET /api/admin/flavors/:slug — flavor detail
   // ════════════════════════════════════════
-  fastify.get<{ Params: { slug: string } }>(
+  f.get<{ Params: { slug: string } }>(
     '/api/admin/flavors/:slug',
     {
       schema: {
@@ -307,7 +369,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // PUT /api/admin/flavors/:slug — update flavor
   // ════════════════════════════════════════
-  fastify.put<{
+  f.put<{
     Params: { slug: string };
     Body: Record<string, unknown>;
   }>(
@@ -395,6 +457,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       return { success: true, data: updated };
     },
   );
+  }); // end protected scope
 };
 
 export default adminRoutes;

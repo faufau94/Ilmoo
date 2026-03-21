@@ -88,7 +88,13 @@ class _MatchScreenState extends State<MatchScreen>
     if (!mounted) return;
 
     if (data.isEmpty) {
-      // No questions available — go back
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Pas encore de questions dans cette catégorie'),
+          backgroundColor: _config.accentNegative,
+        ),
+      );
       Navigator.pop(context);
       return;
     }

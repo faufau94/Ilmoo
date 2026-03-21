@@ -8,7 +8,8 @@ class QuizBattleDefaults {
     appName: 'QuizBattle',
     appId: 'com.quizbattle.app',
     flavorSlug: 'quizapp',
-    apiBaseUrl: 'https://api.quizbattle.com',
+    // 10.0.2.2 = host machine from Android emulator, change to production URL for release
+    apiBaseUrl: 'http://10.0.2.2:3000',
     primaryColor: Color(0xFF1A365D),
     primaryDark: Color(0xFF0A1628),
     accentPositive: Color(0xFF4299E1),

@@ -20,14 +20,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Users, Swords, HelpCircle, Flag } from 'lucide-vue-next'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Separator } from '@/components/ui/separator'
+import { Users, Swords, HelpCircle, Flag, TrendingUp } from 'lucide-vue-next'
 
 const flavorFilter = ref<string>('all')
 
@@ -38,7 +33,7 @@ const { data: statsData } = useQuery({
 
 const { data: questionsData } = useQuery({
   queryKey: ['recent-questions'],
-  queryFn: () => getQuestions({ limit: '5', offset: '0' }),
+  queryFn: () => getQuestions({ limit: '8', offset: '0' }),
 })
 
 const { data: reportsData } = useQuery({
@@ -57,20 +52,20 @@ const metricCards = computed(() => {
     { label: 'Joueurs actifs', value: s.activeToday, subtitle: `${s.totalUsers} au total`, icon: Users },
     { label: 'Matchs aujourd\'hui', value: s.matchesToday, subtitle: `${s.totalMatches} au total`, icon: Swords },
     { label: 'Questions', value: s.totalQuestions, subtitle: 'Questions actives', icon: HelpCircle },
-    { label: 'Signalements', value: s.pendingReports, subtitle: 'En attente de traitement', icon: Flag },
+    { label: 'Signalements', value: s.pendingReports, subtitle: 'En attente', icon: Flag },
   ]
 })
-
-function difficultyColor(d: string) {
-  if (d === 'easy') return 'bg-green-500/10 text-green-500'
-  if (d === 'hard') return 'bg-red-500/10 text-red-500'
-  return 'bg-yellow-500/10 text-yellow-500'
-}
 
 function difficultyLabel(d: string) {
   if (d === 'easy') return 'Facile'
   if (d === 'hard') return 'Difficile'
   return 'Moyen'
+}
+
+function difficultyColor(d: string) {
+  if (d === 'easy') return 'bg-green-500/10 text-green-500'
+  if (d === 'hard') return 'bg-red-500/10 text-red-500'
+  return 'bg-yellow-500/10 text-yellow-500'
 }
 
 function successRate(played: number, correct: number) {
@@ -80,27 +75,27 @@ function successRate(played: number, correct: number) {
 </script>
 
 <template>
-  <div class="p-8 space-y-8">
-    <!-- Header -->
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-bold">Dashboard</h1>
-        <p class="text-muted-foreground text-sm">Vue d'ensemble de l'activité</p>
-      </div>
-      <Select v-model="flavorFilter">
-        <SelectTrigger class="w-44">
-          <SelectValue placeholder="Toutes les apps" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Toutes les apps</SelectItem>
-          <SelectItem value="ilmoo">Ilmoo</SelectItem>
-          <SelectItem value="quizapp">QuizBattle</SelectItem>
-        </SelectContent>
-      </Select>
+  <div class="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
+    <!-- Header with tabs -->
+    <div class="px-4 lg:px-6">
+      <h1 class="text-2xl font-bold tracking-tight">Dashboard</h1>
+      <p class="text-muted-foreground text-sm">Vue d'ensemble de l'activité</p>
     </div>
 
+    <div class="px-4 lg:px-6">
+      <Tabs v-model="flavorFilter" class="w-full">
+        <TabsList>
+          <TabsTrigger value="all">Toutes les apps</TabsTrigger>
+          <TabsTrigger value="ilmoo">Ilmoo</TabsTrigger>
+          <TabsTrigger value="quizapp">QuizBattle</TabsTrigger>
+        </TabsList>
+      </Tabs>
+    </div>
+
+    <Separator />
+
     <!-- Metric cards -->
-    <div class="grid grid-cols-1 gap-4 *:data-[slot=card]:shadow-xs sm:grid-cols-2 lg:grid-cols-4">
+    <div class="grid grid-cols-1 gap-4 px-4 sm:grid-cols-2 lg:grid-cols-4 lg:px-6 *:data-[slot=card]:shadow-xs">
       <Card v-for="card in metricCards" :key="card.label" class="@container/card">
         <CardHeader>
           <CardDescription>{{ card.label }}</CardDescription>
@@ -114,18 +109,21 @@ function successRate(played: number, correct: number) {
           </CardAction>
         </CardHeader>
         <CardFooter class="flex-col items-start gap-1.5 text-sm">
-          <div class="text-muted-foreground">
+          <div class="line-clamp-1 flex gap-2 font-medium">
             {{ card.subtitle }}
+            <TrendingUp class="size-4" />
           </div>
         </CardFooter>
       </Card>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <!-- Recent questions -->
-      <Card>
+    <!-- Content -->
+    <div class="grid grid-cols-1 gap-4 px-4 lg:grid-cols-3 lg:px-6">
+      <!-- Recent questions (2/3) -->
+      <Card class="lg:col-span-2">
         <CardHeader>
-          <CardTitle class="text-lg">Questions récentes</CardTitle>
+          <CardTitle>Questions récentes</CardTitle>
+          <CardDescription>Dernières questions ajoutées</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -139,7 +137,7 @@ function successRate(played: number, correct: number) {
             </TableHeader>
             <TableBody>
               <TableRow v-for="q in questions" :key="(q as any).id">
-                <TableCell class="max-w-50 truncate">
+                <TableCell class="max-w-64 truncate font-medium">
                   {{ (q as any).question_text }}
                 </TableCell>
                 <TableCell>
@@ -147,18 +145,18 @@ function successRate(played: number, correct: number) {
                 </TableCell>
                 <TableCell>
                   <span
-                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                    class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
                     :class="difficultyColor((q as any).difficulty)"
                   >
                     {{ difficultyLabel((q as any).difficulty) }}
                   </span>
                 </TableCell>
-                <TableCell class="text-right">
+                <TableCell class="text-right tabular-nums">
                   {{ successRate((q as any).times_played, (q as any).times_correct) }}
                 </TableCell>
               </TableRow>
               <TableRow v-if="questions.length === 0">
-                <TableCell colspan="4" class="text-center text-muted-foreground">
+                <TableCell colspan="4" class="text-center text-muted-foreground py-8">
                   Aucune question
                 </TableCell>
               </TableRow>
@@ -167,32 +165,36 @@ function successRate(played: number, correct: number) {
         </CardContent>
       </Card>
 
-      <!-- Recent reports -->
+      <!-- Recent reports (1/3) -->
       <Card>
         <CardHeader>
-          <CardTitle class="text-lg">Signalements récents</CardTitle>
+          <CardTitle>Signalements</CardTitle>
+          <CardDescription>En attente de traitement</CardDescription>
         </CardHeader>
         <CardContent>
-          <div v-if="reports.length === 0" class="text-center text-muted-foreground py-8">
-            Aucun signalement en attente
+          <div v-if="reports.length === 0" class="flex flex-col items-center justify-center py-8 text-center">
+            <Flag class="size-8 text-muted-foreground/50 mb-2" />
+            <p class="text-sm text-muted-foreground">Aucun signalement en attente</p>
           </div>
-          <div v-else class="space-y-3">
+          <div v-else class="space-y-4">
             <div
               v-for="r in reports"
               :key="(r as any).id"
-              class="flex items-start gap-3 p-3 rounded-lg bg-muted/50"
+              class="flex items-start gap-3"
             >
-              <Flag class="h-4 w-4 mt-0.5 text-orange-500 shrink-0" />
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium">{{ (r as any).report_type }}</p>
-                <p class="text-xs text-muted-foreground truncate">
+              <div class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10">
+                <Flag class="size-4 text-orange-500" />
+              </div>
+              <div class="flex-1 min-w-0 space-y-1">
+                <p class="text-sm font-medium leading-none">{{ (r as any).report_type }}</p>
+                <p class="text-xs text-muted-foreground line-clamp-1">
                   {{ (r as any).description || 'Pas de description' }}
                 </p>
-                <p class="text-xs text-muted-foreground mt-1">
+                <p class="text-xs text-muted-foreground">
                   par {{ (r as any).reporter_username || 'Anonyme' }}
                 </p>
               </div>
-              <Badge variant="outline" class="shrink-0">{{ (r as any).status }}</Badge>
+              <Badge variant="secondary" class="shrink-0 text-xs">{{ (r as any).status }}</Badge>
             </div>
           </div>
         </CardContent>

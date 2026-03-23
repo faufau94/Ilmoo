@@ -115,7 +115,7 @@ export async function importQuestions(questions: Record<string, unknown>[]) {
 // ── Categories ──
 
 export async function getCategories() {
-  return request<{ success: boolean; data: unknown[] }>('/api/categories')
+  return request<{ success: boolean; data: unknown[] }>('/api/admin/categories')
 }
 
 export async function createCategory(body: Record<string, unknown>) {
@@ -162,6 +162,35 @@ export async function getFlavor(slug: string) {
 
 export async function updateFlavor(slug: string, body: Record<string, unknown>) {
   return request(`/api/admin/flavors/${slug}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+}
+
+// ── Matches ──
+
+export async function getMatches(params?: Record<string, string>) {
+  const query = params ? '?' + new URLSearchParams(params).toString() : ''
+  return request<{ success: boolean; data: unknown[]; pagination: Pagination }>(
+    `/api/admin/matches${query}`,
+  )
+}
+
+// ── Tournaments ──
+
+export async function getTournaments() {
+  return request<{ success: boolean; data: unknown[] }>('/api/admin/tournaments')
+}
+
+export async function createTournament(body: Record<string, unknown>) {
+  return request('/api/admin/tournaments', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function updateTournament(id: string, body: Record<string, unknown>) {
+  return request(`/api/admin/tournaments/${id}`, {
     method: 'PUT',
     body: JSON.stringify(body),
   })

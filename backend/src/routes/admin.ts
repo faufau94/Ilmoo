@@ -79,6 +79,178 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     f.addHook('preHandler', requireAdmin);
 
   // ════════════════════════════════════════
+  // GET /api/admin/categories — all categories (including inactive)
+  // ════════════════════════════════════════
+  f.get('/api/admin/categories', async () => {
+    const result = await query(
+      `SELECT c.*,
+        (SELECT COUNT(*) FROM categories sub WHERE sub.parent_id = c.id) as subcategories_count
+       FROM categories c
+       ORDER BY c.parent_id NULLS FIRST, c.sort_order, c.name`,
+    );
+
+    const data = result.rows.map((row: Record<string, unknown>) => ({
+      ...row,
+      subcategories_count: Number(row.subcategories_count),
+    }));
+
+    return { success: true, data };
+  });
+
+  // ════════════════════════════════════════
+  // GET /api/admin/matches — match history
+  // ════════════════════════════════════════
+  f.get<{
+    Querystring: { type?: string; status?: string; limit?: string; offset?: string };
+  }>(
+    '/api/admin/matches',
+    {
+      schema: {
+        querystring: {
+          type: 'object' as const,
+          properties: {
+            type: { type: 'string', enum: ['ranked', 'friendly', 'solo', 'tournament'] },
+            status: { type: 'string', enum: ['waiting', 'in_progress', 'completed', 'cancelled'] },
+            limit: { type: 'string', pattern: '^\\d+$' },
+            offset: { type: 'string', pattern: '^\\d+$' },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { type, status, limit: rawLimit, offset: rawOffset } = request.query;
+      const limit = Math.min(Number(rawLimit) || 30, 200);
+      const offset = Number(rawOffset) || 0;
+
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      let pi = 1;
+
+      if (type) { conditions.push(`m.match_type = $${pi++}`); params.push(type); }
+      if (status) { conditions.push(`m.status = $${pi++}`); params.push(status); }
+
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      const countResult = await query(`SELECT COUNT(*) as total FROM matches m ${where}`, params);
+      const total = Number(countResult.rows[0]?.total ?? 0);
+
+      const result = await query(
+        `SELECT m.*,
+          p1.username as player1_username,
+          p2.username as player2_username,
+          c.name as category_name
+        FROM matches m
+        LEFT JOIN users p1 ON p1.id = m.player1_id
+        LEFT JOIN users p2 ON p2.id = m.player2_id
+        LEFT JOIN categories c ON c.id = m.category_id
+        ${where}
+        ORDER BY m.created_at DESC
+        LIMIT $${pi++} OFFSET $${pi++}`,
+        [...params, limit, offset],
+      );
+
+      return { success: true, data: result.rows, pagination: { total, limit, offset } };
+    },
+  );
+
+  // ════════════════════════════════════════
+  // GET /api/admin/tournaments — list tournaments
+  // ════════════════════════════════════════
+  f.get('/api/admin/tournaments', async () => {
+    const result = await query('SELECT * FROM tournaments ORDER BY created_at DESC');
+    return { success: true, data: result.rows };
+  });
+
+  // ════════════════════════════════════════
+  // POST /api/admin/tournaments — create tournament
+  // ════════════════════════════════════════
+  f.post<{ Body: Record<string, unknown> }>(
+    '/api/admin/tournaments',
+    {
+      schema: {
+        body: {
+          type: 'object' as const,
+          required: ['name'],
+          properties: {
+            name: { type: 'string', minLength: 1 },
+            description: { type: ['string', 'null'] },
+            status: { type: 'string', enum: ['draft', 'active', 'completed', 'cancelled'] },
+            max_players: { type: 'integer', minimum: 2 },
+            start_date: { type: ['string', 'null'] },
+            end_date: { type: ['string', 'null'] },
+            sponsor_name: { type: ['string', 'null'] },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const b = request.body;
+      const result = await getOne(
+        `INSERT INTO tournaments (name, description, status, max_players, start_date, end_date, sponsor_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [b.name, b.description ?? null, b.status ?? 'draft', b.max_players ?? 100, b.start_date ?? null, b.end_date ?? null, b.sponsor_name ?? null],
+      );
+      return reply.status(201).send({ success: true, data: result });
+    },
+  );
+
+  // ════════════════════════════════════════
+  // PUT /api/admin/tournaments/:id — update tournament
+  // ════════════════════════════════════════
+  f.put<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/admin/tournaments/:id',
+    {
+      schema: {
+        params: { type: 'object' as const, required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+        body: {
+          type: 'object' as const,
+          properties: {
+            name: { type: 'string', minLength: 1 },
+            description: { type: ['string', 'null'] },
+            status: { type: 'string', enum: ['draft', 'active', 'completed', 'cancelled'] },
+            max_players: { type: 'integer', minimum: 2 },
+            start_date: { type: ['string', 'null'] },
+            end_date: { type: ['string', 'null'] },
+            sponsor_name: { type: ['string', 'null'] },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params;
+      const body = request.body;
+
+      const fields = ['name', 'description', 'status', 'max_players', 'start_date', 'end_date', 'sponsor_name'];
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      let pi = 1;
+
+      for (const field of fields) {
+        if (body[field] !== undefined) {
+          sets.push(`${field} = $${pi++}`);
+          params.push(body[field]);
+        }
+      }
+
+      if (sets.length === 0) {
+        return reply.status(400).send({ success: false, error: 'No fields to update' });
+      }
+
+      params.push(id);
+      const updated = await getOne(
+        `UPDATE tournaments SET ${sets.join(', ')} WHERE id = $${pi} RETURNING *`,
+        params,
+      );
+
+      if (!updated) {
+        return reply.status(404).send({ success: false, error: 'Tournament not found' });
+      }
+
+      return { success: true, data: updated };
+    },
+  );
+
+  // ════════════════════════════════════════
   // GET /api/admin/stats — dashboard metrics
   // ════════════════════════════════════════
   f.get<{ Querystring: { flavor?: string } }>(

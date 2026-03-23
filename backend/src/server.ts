@@ -60,7 +60,10 @@ export async function buildApp(options?: { logger?: boolean }) {
   fastify.decorate('io', io);
 
   // ── CORS ──
-  await fastify.register(cors, { origin: corsOrigin });
+  await fastify.register(cors, {
+    origin: corsOrigin,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
+  });
 
   // ── Rate limiting (global: 100 req/min) ──
   await fastify.register(rateLimit, {

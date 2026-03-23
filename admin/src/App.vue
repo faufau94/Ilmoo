@@ -87,21 +87,20 @@ function handleLogout() {
       </nav>
 
       <!-- Bottom actions -->
-      <div class="p-3 border-t border-border space-y-1">
+      <div class="p-3 border-t border-border flex items-center justify-between">
         <button
-          class="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          @click="toggleDarkMode"
-        >
-          <Sun v-if="isDark" class="h-4 w-4" />
-          <Moon v-else class="h-4 w-4" />
-          {{ isDark ? 'Mode clair' : 'Mode sombre' }}
-        </button>
-        <button
-          class="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
           @click="handleLogout"
         >
           <LogOut class="h-4 w-4" />
           Déconnexion
+        </button>
+        <button
+          class="p-2 rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          @click="toggleDarkMode"
+        >
+          <Sun v-if="isDark" class="h-4 w-4" />
+          <Moon v-else class="h-4 w-4" />
         </button>
       </div>
     </aside>

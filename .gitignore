@@ -53,6 +53,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Questions seed (contenu propriétaire, ne pas pusher)
+backend/src/db/seed-questions-*.ts
+
 # Docker (volumes locaux, overrides)
 docker-compose.override.yml
 docker-compose.override.yaml

@@ -26,6 +26,11 @@ interface QuestionRow {
 interface ListQuery {
   categoryId?: string;
   difficulty?: 'easy' | 'medium' | 'hard';
+  search?: string;
+  isVerified?: string;       // 'true' | 'false'
+  minPlayed?: string;        // filtre times_played >= n
+  maxSuccessRate?: string;   // filtre taux réussite <= n (%)
+  minSuccessRate?: string;   // filtre taux réussite >= n (%)
   limit?: string;
   offset?: string;
 }
@@ -65,6 +70,11 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
           properties: {
             categoryId: { type: 'string', format: 'uuid' },
             difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] },
+            search: { type: 'string', maxLength: 200 },
+            isVerified: { type: 'string', enum: ['true', 'false'] },
+            minPlayed: { type: 'string', pattern: '^\\d+$' },
+            minSuccessRate: { type: 'string', pattern: '^\\d+$' },
+            maxSuccessRate: { type: 'string', pattern: '^\\d+$' },
             limit: { type: 'string', pattern: '^\\d+$' },
             offset: { type: 'string', pattern: '^\\d+$' },
           },
@@ -72,7 +82,11 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => {
-      const { categoryId, difficulty, limit: rawLimit, offset: rawOffset } = request.query;
+      const {
+        categoryId, difficulty, search,
+        isVerified, minPlayed, minSuccessRate, maxSuccessRate,
+        limit: rawLimit, offset: rawOffset,
+      } = request.query;
       const limit = Math.min(Number(rawLimit) || 20, 100);
       const offset = Number(rawOffset) || 0;
 
@@ -87,6 +101,27 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
       if (difficulty) {
         conditions.push(`q.difficulty = $${paramIndex++}`);
         params.push(difficulty);
+      }
+      if (search) {
+        conditions.push(`(q.question_text ILIKE $${paramIndex} OR q.answers::text ILIKE $${paramIndex})`);
+        params.push(`%${search}%`);
+        paramIndex++;
+      }
+      if (isVerified !== undefined) {
+        conditions.push(`q.is_verified = $${paramIndex++}`);
+        params.push(isVerified === 'true');
+      }
+      if (minPlayed) {
+        conditions.push(`q.times_played >= $${paramIndex++}`);
+        params.push(Number(minPlayed));
+      }
+      if (minSuccessRate) {
+        conditions.push(`(q.times_played = 0 OR ROUND(q.times_correct::numeric / q.times_played * 100) >= $${paramIndex++})`);
+        params.push(Number(minSuccessRate));
+      }
+      if (maxSuccessRate) {
+        conditions.push(`(q.times_played > 0 AND ROUND(q.times_correct::numeric / q.times_played * 100) <= $${paramIndex++})`);
+        params.push(Number(maxSuccessRate));
       }
 
       const where = conditions.join(' AND ');

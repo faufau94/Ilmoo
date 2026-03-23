@@ -37,18 +37,22 @@ const categoriesRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // GET /api/categories — root categories
   // ════════════════════════════════════════
-  fastify.get('/api/categories', async () => {
-    const result = await query<CategoryRow & { subcategories_count: string }>(
+  fastify.get<{ Querystring: { all?: string } }>('/api/categories', async (request) => {
+    const showAll = request.query.all === 'true';
+
+    const result = await query<CategoryRow & { subcategories_count: string; question_count: string }>(
       `SELECT c.*,
-        (SELECT COUNT(*) FROM categories sub WHERE sub.parent_id = c.id AND sub.is_active = true) as subcategories_count
+        (SELECT COUNT(*) FROM categories sub WHERE sub.parent_id = c.id ${showAll ? '' : 'AND sub.is_active = true'}) as subcategories_count,
+        (SELECT COUNT(*) FROM questions q WHERE q.category_id = c.id AND q.is_active = true) as question_count
        FROM categories c
-       WHERE c.parent_id IS NULL AND c.is_active = true
+       WHERE c.parent_id IS NULL ${showAll ? '' : 'AND c.is_active = true'}
        ORDER BY c.sort_order, c.name`,
     );
 
     const data = result.rows.map((row) => ({
       ...row,
       subcategories_count: Number(row.subcategories_count),
+      question_count: Number(row.question_count),
     }));
 
     return { success: true, data };
@@ -72,7 +76,9 @@ const categoriesRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const category = await getOne<CategoryRow>(
-        `SELECT * FROM categories WHERE slug = $1 AND is_active = true`,
+        `SELECT c.*,
+          (SELECT COUNT(*) FROM questions q WHERE q.category_id = c.id AND q.is_active = true) as question_count
+         FROM categories c WHERE c.slug = $1 AND c.is_active = true`,
         [request.params.slug],
       );
 
@@ -84,9 +90,11 @@ const categoriesRoutes: FastifyPluginAsync = async (fastify) => {
       let subcategories: CategoryRow[] = [];
       if (!category.parent_id) {
         const subResult = await query<CategoryRow>(
-          `SELECT * FROM categories
-           WHERE parent_id = $1 AND is_active = true
-           ORDER BY sort_order, name`,
+          `SELECT c.*,
+            (SELECT COUNT(*) FROM questions q WHERE q.category_id = c.id AND q.is_active = true) as question_count
+           FROM categories c
+           WHERE c.parent_id = $1 AND c.is_active = true
+           ORDER BY c.sort_order, c.name`,
           [category.id],
         );
         subcategories = subResult.rows;

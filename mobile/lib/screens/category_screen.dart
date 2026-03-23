@@ -47,13 +47,6 @@ class _CategoryScreenState extends State<CategoryScreen> {
           builder: (_) => _SubcategoryScreen(parent: category),
         ),
       );
-    } else if (category.questionCount == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Pas encore de questions dans cette catégorie'),
-          backgroundColor: context.read<AppConfig>().accentNegative,
-        ),
-      );
     } else {
       _startMatch(category);
     }
@@ -199,12 +192,11 @@ class _CategoryCard extends StatelessWidget {
             const SizedBox(height: 6),
 
             // Subtitle
-            Text(
-              category.subcategoriesCount > 0
-                  ? '${category.subcategoriesCount} sous-catégories'
-                  : '${category.questionCount} questions',
-              style: TextStyle(color: Colors.white54, fontSize: 12),
-            ),
+            if (category.subcategoriesCount > 0)
+              Text(
+                '${category.subcategoriesCount} sous-catégories',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
 
             // Premium badge
             if (category.isPremium) ...[
@@ -259,16 +251,7 @@ class _SubcategoryScreenState extends State<_SubcategoryScreen> {
     }
   }
 
-  void _startMatch(String categoryId, String categoryName, {int questionCount = -1}) {
-    if (questionCount == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Pas encore de questions dans cette catégorie'),
-          backgroundColor: context.read<AppConfig>().accentNegative,
-        ),
-      );
-      return;
-    }
+  void _startMatch(String categoryId, String categoryName) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => MatchScreen(
@@ -359,7 +342,7 @@ class _SubcategoryScreenState extends State<_SubcategoryScreen> {
                         itemBuilder: (context, index) {
                           final sub = _subcategories[index];
                           return GestureDetector(
-                            onTap: () => _startMatch(sub.id, sub.name, questionCount: sub.questionCount),
+                            onTap: () => _startMatch(sub.id, sub.name),
                             child: Container(
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
@@ -381,10 +364,6 @@ class _SubcategoryScreenState extends State<_SubcategoryScreen> {
                                           ),
                                         ),
                                         const SizedBox(height: 4),
-                                        Text(
-                                          '${sub.questionCount} questions',
-                                          style: TextStyle(color: Colors.white54, fontSize: 12),
-                                        ),
                                       ],
                                     ),
                                   ),

@@ -84,7 +84,8 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
   f.get('/api/admin/categories', async () => {
     const result = await query(
       `SELECT c.*,
-        (SELECT COUNT(*) FROM categories sub WHERE sub.parent_id = c.id) as subcategories_count
+        (SELECT COUNT(*) FROM categories sub WHERE sub.parent_id = c.id) as subcategories_count,
+        (SELECT COUNT(*) FROM questions q WHERE q.category_id = c.id AND q.is_active = true) as question_count
        FROM categories c
        ORDER BY c.parent_id NULLS FIRST, c.sort_order, c.name`,
     );
@@ -92,6 +93,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
     const data = result.rows.map((row: Record<string, unknown>) => ({
       ...row,
       subcategories_count: Number(row.subcategories_count),
+      question_count: Number(row.question_count),
     }));
 
     return { success: true, data };

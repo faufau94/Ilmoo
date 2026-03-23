@@ -56,13 +56,21 @@ const queryClient = useQueryClient()
 const search = ref('')
 const filterCategory = ref('all')
 const filterDifficulty = ref('all')
+const filterVerified = ref('all')   // 'all' | 'true' | 'false'
+const filterPlayed = ref('all')     // 'all' | '1' | '10' | '50'
+const filterSuccess = ref('all')    // 'all' | 'low' (<=40%) | 'high' (>=80%)
 const page = ref(0)
 const limit = 20
 
 const queryParams = computed(() => {
   const p: Record<string, string> = { limit: String(limit), offset: String(page.value * limit) }
-  if (filterCategory.value && filterCategory.value !== 'all') p.categoryId = filterCategory.value
-  if (filterDifficulty.value && filterDifficulty.value !== 'all') p.difficulty = filterDifficulty.value
+  if (filterCategory.value !== 'all') p.categoryId = filterCategory.value
+  if (filterDifficulty.value !== 'all') p.difficulty = filterDifficulty.value
+  if (search.value.trim()) p.search = search.value.trim()
+  if (filterVerified.value !== 'all') p.isVerified = filterVerified.value
+  if (filterPlayed.value !== 'all') p.minPlayed = filterPlayed.value
+  if (filterSuccess.value === 'low') p.maxSuccessRate = '40'
+  if (filterSuccess.value === 'high') p.minSuccessRate = '80'
   return p
 })
 
@@ -81,7 +89,7 @@ const totalQuestions = computed(() => questionsData.value?.pagination?.total ?? 
 const categories = computed(() => (categoriesData.value?.data ?? []) as CategoryRow[])
 const totalPages = computed(() => Math.ceil(totalQuestions.value / limit))
 
-watch([filterCategory, filterDifficulty], () => { page.value = 0 })
+watch([filterCategory, filterDifficulty, filterVerified, filterPlayed, filterSuccess, search], () => { page.value = 0 })
 
 // ── CRUD Dialog ──
 const showDialog = ref(false)
@@ -239,24 +247,24 @@ interface CategoryRow {
     </div>
 
     <!-- Filters -->
-    <div class="flex gap-3">
-      <div class="relative flex-1 max-w-sm">
+    <div class="flex flex-wrap gap-3">
+      <div class="relative flex-1 min-w-50 max-w-sm">
         <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input v-model="search" placeholder="Rechercher..." class="pl-9" />
+        <Input v-model="search" placeholder="Rechercher une question..." class="pl-9" />
       </div>
       <Select v-model="filterCategory">
-        <SelectTrigger class="w-48">
+        <SelectTrigger class="w-44">
           <SelectValue placeholder="Catégorie" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">Catégorie</SelectItem>
+          <SelectItem value="all">Toutes catégories</SelectItem>
           <SelectItem v-for="cat in categories" :key="cat.id" :value="cat.id">
-            {{ cat.name }}
+            {{ cat.parent_id ? '└ ' : '' }}{{ cat.name }}
           </SelectItem>
         </SelectContent>
       </Select>
       <Select v-model="filterDifficulty">
-        <SelectTrigger class="w-48">
+        <SelectTrigger class="w-36">
           <SelectValue placeholder="Difficulté" />
         </SelectTrigger>
         <SelectContent>
@@ -264,6 +272,37 @@ interface CategoryRow {
           <SelectItem value="easy">Facile</SelectItem>
           <SelectItem value="medium">Moyen</SelectItem>
           <SelectItem value="hard">Difficile</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select v-model="filterVerified">
+        <SelectTrigger class="w-36">
+          <SelectValue placeholder="Vérifiée" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Vérification</SelectItem>
+          <SelectItem value="true">Vérifiée</SelectItem>
+          <SelectItem value="false">Non vérifiée</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select v-model="filterPlayed">
+        <SelectTrigger class="w-36">
+          <SelectValue placeholder="Jouée" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Fois jouée</SelectItem>
+          <SelectItem value="1">Jouée ≥ 1×</SelectItem>
+          <SelectItem value="10">Jouée ≥ 10×</SelectItem>
+          <SelectItem value="50">Jouée ≥ 50×</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select v-model="filterSuccess">
+        <SelectTrigger class="w-40">
+          <SelectValue placeholder="Réussite" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Taux réussite</SelectItem>
+          <SelectItem value="low">Difficile (≤ 40%)</SelectItem>
+          <SelectItem value="high">Facile (≥ 80%)</SelectItem>
         </SelectContent>
       </Select>
     </div>

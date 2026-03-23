@@ -170,7 +170,9 @@ interface CategoryRow {
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-bold">Catégories</h1>
-        <p class="text-muted-foreground text-sm mt-1">{{ allCategories.length }} catégories au total</p>
+        <p class="text-muted-foreground text-sm mt-1">
+          {{ rootCategories.length }} catégories au total · {{ allCategories.length - rootCategories.length }} sous-catégories
+        </p>
       </div>
       <Button @click="openCreate()">
         <Plus class="h-4 w-4 mr-2" /> Ajouter une catégorie

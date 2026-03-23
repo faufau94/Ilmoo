@@ -17,8 +17,12 @@ async function request<T = unknown>(
   options: RequestInit = {},
 ): Promise<T> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
+  }
+
+  // Only set Content-Type for requests with a body
+  if (options.body) {
+    headers['Content-Type'] = 'application/json'
   }
 
   if (authToken) {
@@ -193,6 +197,28 @@ export async function updateTournament(id: string, body: Record<string, unknown>
   return request(`/api/admin/tournaments/${id}`, {
     method: 'PUT',
     body: JSON.stringify(body),
+  })
+}
+
+// ── Admin profile ──
+
+export async function getAdminProfile() {
+  return request<{ success: boolean; data: { id: string; username: string | null; email: string } }>(
+    '/api/admin/profile',
+  )
+}
+
+export async function updateAdminProfile(body: { username?: string; email?: string }) {
+  return request('/api/admin/profile', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function changeAdminPassword(currentPassword: string, newPassword: string) {
+  return request('/api/admin/password', {
+    method: 'PUT',
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   })
 }
 

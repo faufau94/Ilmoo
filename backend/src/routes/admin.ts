@@ -631,6 +631,91 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       return { success: true, data: updated };
     },
   );
+  // ════════════════════════════════════════
+  // GET /api/admin/profile — admin profile
+  // ════════════════════════════════════════
+  f.get('/api/admin/profile', async (request) => {
+    const userId = request.user.id;
+    const user = await getOne<{ id: string; username: string | null; email: string }>(
+      `SELECT id, username, email FROM users WHERE id = $1`,
+      [userId],
+    );
+    return { success: true, data: user };
+  });
+
+  // ════════════════════════════════════════
+  // PUT /api/admin/profile — update admin profile
+  // ════════════════════════════════════════
+  f.put<{ Body: { username?: string; email?: string } }>(
+    '/api/admin/profile',
+    {
+      schema: {
+        body: {
+          type: 'object' as const,
+          properties: {
+            username: { type: 'string', minLength: 1, maxLength: 50 },
+            email: { type: 'string', format: 'email' },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const userId = request.user.id;
+      const { username, email } = request.body;
+
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      let pi = 1;
+      if (username !== undefined) { sets.push(`username = $${pi++}`); params.push(username); }
+      if (email !== undefined) { sets.push(`email = $${pi++}`); params.push(email); }
+      if (sets.length === 0) return reply.status(400).send({ success: false, error: 'Rien à modifier' });
+
+      params.push(userId);
+      const updated = await getOne(
+        `UPDATE users SET ${sets.join(', ')} WHERE id = $${pi} RETURNING id, username, email`,
+        params,
+      );
+      return { success: true, data: updated };
+    },
+  );
+
+  // ════════════════════════════════════════
+  // PUT /api/admin/password — change admin password
+  // ════════════════════════════════════════
+  f.put<{ Body: { current_password: string; new_password: string } }>(
+    '/api/admin/password',
+    {
+      schema: {
+        body: {
+          type: 'object' as const,
+          required: ['current_password', 'new_password'],
+          properties: {
+            current_password: { type: 'string', minLength: 1 },
+            new_password: { type: 'string', minLength: 8 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const userId = request.user.id;
+      const { current_password, new_password } = request.body;
+
+      const user = await getOne<{ password_hash: string | null }>(
+        `SELECT password_hash FROM users WHERE id = $1`,
+        [userId],
+      );
+      if (!user?.password_hash) return reply.status(400).send({ success: false, error: 'Pas de mot de passe' });
+
+      const valid = await bcrypt.compare(current_password, user.password_hash);
+      if (!valid) return reply.status(401).send({ success: false, error: 'Mot de passe actuel incorrect' });
+
+      const hash = await bcrypt.hash(new_password, 10);
+      await query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [hash, userId]);
+
+      return { success: true, data: { message: 'Mot de passe modifié' } };
+    },
+  );
+
   }); // end protected scope
 };
 

@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Checkbox } from '@/components/ui/checkbox'
 import { ArrowLeft, Smartphone, Palette, Gamepad2, Trophy, Type, Settings, ChevronRight } from 'lucide-vue-next'
 
 const queryClient = useQueryClient()
@@ -325,11 +326,9 @@ interface CategoryRow {
                 class="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 cursor-pointer"
               >
                 <div class="flex items-center gap-3">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     :checked="isCatEnabled(cat.id)"
-                    class="rounded"
-                    @change="toggleCategory(cat.id)"
+                    @update:checked="toggleCategory(cat.id)"
                   />
                   <span class="text-sm font-medium">{{ cat.name }}</span>
                 </div>

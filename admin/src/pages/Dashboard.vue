@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { getStats, getQuestions, getReports } from '@/lib/api'
+import { useFlavor } from '@/composables/useFlavor'
 import {
   Card,
   CardAction,
@@ -20,15 +21,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { Users, Swords, HelpCircle, Flag, TrendingUp } from 'lucide-vue-next'
 
-const flavorFilter = ref<string>('all')
+const { activeFlavor } = useFlavor()
 
 const { data: statsData } = useQuery({
-  queryKey: ['stats', flavorFilter],
-  queryFn: () => getStats(flavorFilter.value === 'all' ? undefined : flavorFilter.value),
+  queryKey: ['stats', activeFlavor],
+  queryFn: () => getStats(activeFlavor.value),
 })
 
 const { data: questionsData } = useQuery({
@@ -78,18 +78,8 @@ function successRate(played: number, correct: number) {
   <div class="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
     <!-- Header with tabs -->
     <div class="px-4 lg:px-6">
-      <h1 class="text-2xl font-bold tracking-tight">Dashboard</h1>
+      <h1 class="text-2xl font-bold tracking-tight">Tableau de bord</h1>
       <p class="text-muted-foreground text-sm">Vue d'ensemble de l'activité</p>
-    </div>
-
-    <div class="px-4 lg:px-6">
-      <Tabs v-model="flavorFilter" class="w-full">
-        <TabsList>
-          <TabsTrigger value="all">Toutes les apps</TabsTrigger>
-          <TabsTrigger value="ilmoo">Ilmoo</TabsTrigger>
-          <TabsTrigger value="quizapp">QuizBattle</TabsTrigger>
-        </TabsList>
-      </Tabs>
     </div>
 
     <Separator />

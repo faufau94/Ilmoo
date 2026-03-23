@@ -18,9 +18,14 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/pages/Dashboard.vue'),
   },
   {
-    path: '/applications',
-    name: 'applications',
-    component: () => import('@/pages/Applications.vue'),
+    path: '/profile',
+    name: 'profile',
+    component: () => import('@/pages/Profile.vue'),
+  },
+  {
+    path: '/notifications',
+    name: 'notifications',
+    component: () => import('@/pages/Notifications.vue'),
   },
   {
     path: '/questions',

@@ -87,7 +87,7 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
         isVerified, minPlayed, minSuccessRate, maxSuccessRate,
         limit: rawLimit, offset: rawOffset,
       } = request.query;
-      const limit = Math.min(Number(rawLimit) || 20, 100);
+      const limit = Math.min(Number(rawLimit) || 20, 500);
       const offset = Number(rawOffset) || 0;
 
       const conditions: string[] = ['q.is_active = true'];

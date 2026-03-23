@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, h } from 'vue'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { getCategories, createCategory, updateCategory, deleteCategory } from '@/lib/api'
+import { useToast } from '@/composables/useToast'
+import type { ColumnDef } from '@tanstack/vue-table'
+import DataTable from '@/components/DataTable.vue'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -10,39 +13,18 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+  AlertDialog, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Plus, Pencil, Trash2, FolderPlus } from 'lucide-vue-next'
 
+const toast = useToast()
 const queryClient = useQueryClient()
 
 const { data: categoriesData, isLoading } = useQuery({
@@ -53,8 +35,47 @@ const { data: categoriesData, isLoading } = useQuery({
 const allCategories = computed(() => (categoriesData.value?.data ?? []) as CategoryRow[])
 const rootCategories = computed(() => allCategories.value.filter(c => !c.parent_id))
 
-function subcategoriesOf(parentId: string) {
-  return allCategories.value.filter(c => c.parent_id === parentId)
+// ── Filters ──
+const filterStatus = ref('all')   // all | active | inactive
+const filterPremium = ref('all')  // all | premium | free
+const filterLevel = ref('all')    // all | root | sub
+
+// Flat list for the DataTable (root + subcategories interleaved)
+const flatRows = computed<CategoryRow[]>(() => {
+  const rows: CategoryRow[] = []
+  for (const root of rootCategories.value) {
+    const subs = allCategories.value.filter(c => c.parent_id === root.id)
+
+    // Apply filters
+    const matchRoot = matchesFilters(root)
+    const matchingSubs = subs.filter(s => matchesFilters(s))
+
+    // Show root if it matches, or if any of its subs match
+    if (filterLevel.value === 'sub') {
+      // Only show subs
+      matchingSubs.forEach(s => rows.push(s))
+    } else if (filterLevel.value === 'root') {
+      if (matchRoot) rows.push(root)
+    } else {
+      if (matchRoot || matchingSubs.length > 0) {
+        rows.push(root)
+        if (matchRoot) {
+          matchingSubs.forEach(s => rows.push(s))
+        } else {
+          matchingSubs.forEach(s => rows.push(s))
+        }
+      }
+    }
+  }
+  return rows
+})
+
+function matchesFilters(cat: CategoryRow) {
+  if (filterStatus.value === 'active' && !cat.is_active) return false
+  if (filterStatus.value === 'inactive' && cat.is_active) return false
+  if (filterPremium.value === 'premium' && !cat.is_premium) return false
+  if (filterPremium.value === 'free' && cat.is_premium) return false
+  return true
 }
 
 // ── CRUD Dialog ──
@@ -111,20 +132,24 @@ const saveMutation = useMutation({
       name: form.value.name,
       slug: form.value.slug,
       description: form.value.description || null,
-      icon_name: form.value.icon_name || null,
+      icon_name: form.value.icon_name || 'default',
       color: form.value.color,
       is_premium: form.value.is_premium,
       sort_order: form.value.sort_order,
     }
     if (form.value.parent_id && form.value.parent_id !== 'none') body.parent_id = form.value.parent_id
-    if (editingId.value) {
-      return updateCategory(editingId.value, body)
-    }
+    if (editingId.value) return updateCategory(editingId.value, body)
     return createCategory(body)
   },
   onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['categories-all'] })
+    const isEdit = !!editingId.value
     showDialog.value = false
+    editingId.value = null
+    queryClient.invalidateQueries({ queryKey: ['categories-all'] })
+    toast.success(isEdit ? 'Catégorie mise à jour' : 'Catégorie créée')
+  },
+  onError: (err: Error) => {
+    toast.error('Erreur', err.message)
   },
 })
 
@@ -132,12 +157,24 @@ const saveMutation = useMutation({
 const deleteTarget = ref<CategoryRow | null>(null)
 
 const deleteMutation = useMutation({
-  mutationFn: () => deleteCategory(deleteTarget.value!.id),
+  mutationFn: (id: string) => deleteCategory(id),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['categories-all'] })
+    toast.success('Catégorie supprimée')
+    deleteTarget.value = null
+  },
+  onError: (err: Error) => {
+    toast.error('Erreur', err.message)
     deleteTarget.value = null
   },
 })
+
+function confirmDelete() {
+  const id = deleteTarget.value?.id
+  if (!id) return
+  deleteTarget.value = null
+  deleteMutation.mutate(id)
+}
 
 // ── Toggle active ──
 const toggleMutation = useMutation({
@@ -147,6 +184,74 @@ const toggleMutation = useMutation({
     queryClient.invalidateQueries({ queryKey: ['categories-all'] })
   },
 })
+
+// ── TanStack Table columns ──
+const columns: ColumnDef<CategoryRow, unknown>[] = [
+  {
+    id: 'color',
+    header: '',
+    size: 40,
+    cell: ({ row }) => h('div', {
+      class: row.original.parent_id ? 'ml-4 w-4 h-4 rounded-full' : 'w-6 h-6 rounded-full',
+      style: { backgroundColor: row.original.color ?? '#888' },
+    }),
+  },
+  {
+    accessorKey: 'name',
+    header: 'Nom',
+    cell: ({ row }) => h('span', {
+      class: row.original.parent_id ? 'pl-6 text-sm' : 'font-semibold',
+    }, (row.original.parent_id ? '└ ' : '') + row.original.name),
+  },
+  {
+    accessorKey: 'slug',
+    header: 'Slug',
+    cell: ({ row }) => h('span', { class: 'text-muted-foreground text-sm' }, row.original.slug),
+  },
+  {
+    accessorKey: 'question_count',
+    header: 'Questions',
+    meta: { align: 'right' },
+    cell: ({ row }) => h('span', { class: 'text-right block' }, String(row.original.question_count)),
+  },
+  {
+    id: 'premium',
+    header: 'Premium',
+    cell: ({ row }) => row.original.is_premium
+      ? h(Badge, { variant: 'secondary' }, () => 'Premium')
+      : null,
+  },
+  {
+    id: 'active',
+    header: 'Actif',
+    cell: ({ row }) => h(Switch, {
+      modelValue: row.original.is_active,
+      'onUpdate:modelValue': (val: boolean) =>
+        toggleMutation.mutate({ id: row.original.id, active: val }),
+    }),
+  },
+  {
+    id: 'actions',
+    header: '',
+    cell: ({ row }) => {
+      const cat = row.original
+      const btns = []
+      if (!cat.parent_id) {
+        btns.push(h(Button, {
+          variant: 'ghost', size: 'icon', class: 'cursor-pointer', title: 'Ajouter sous-catégorie',
+          onClick: () => openCreate(cat.id),
+        }, () => h(FolderPlus, { class: 'h-4 w-4' })))
+      }
+      btns.push(
+        h(Button, { variant: 'ghost', size: 'icon', class: 'cursor-pointer', onClick: () => openEdit(cat) },
+          () => h(Pencil, { class: 'h-4 w-4' })),
+        h(Button, { variant: 'ghost', size: 'icon', class: 'cursor-pointer', onClick: () => { deleteTarget.value = cat } },
+          () => h(Trash2, { class: 'h-4 w-4 text-destructive' })),
+      )
+      return h('div', { class: 'flex justify-end gap-1' }, btns)
+    },
+  },
+]
 
 // ── Types ──
 interface CategoryRow {
@@ -171,119 +276,54 @@ interface CategoryRow {
       <div>
         <h1 class="text-2xl font-bold">Catégories</h1>
         <p class="text-muted-foreground text-sm mt-1">
-          {{ rootCategories.length }} catégories au total · {{ allCategories.length - rootCategories.length }} sous-catégories
+          {{ rootCategories.length }} catégories · {{ allCategories.length - rootCategories.length }} sous-catégories
         </p>
       </div>
-      <Button @click="openCreate()">
+      <Button @click="openCreate()" class="cursor-pointer">
         <Plus class="h-4 w-4 mr-2" /> Ajouter une catégorie
       </Button>
     </div>
 
-    <!-- Table -->
-    <Card>
-      <CardContent class="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead class="w-12"></TableHead>
-              <TableHead>Nom</TableHead>
-              <TableHead>Slug</TableHead>
-              <TableHead class="text-right">Questions</TableHead>
-              <TableHead class="text-center">Premium</TableHead>
-              <TableHead class="text-center">Actif</TableHead>
-              <TableHead class="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <template v-if="isLoading">
-              <TableRow>
-                <TableCell colspan="7" class="text-center py-8 text-muted-foreground">
-                  Chargement...
-                </TableCell>
-              </TableRow>
-            </template>
-            <template v-else-if="rootCategories.length === 0">
-              <TableRow>
-                <TableCell colspan="7" class="text-center py-8 text-muted-foreground">
-                  Aucune catégorie
-                </TableCell>
-              </TableRow>
-            </template>
-            <template v-else v-for="root in rootCategories" :key="root.id">
-              <!-- Root category -->
-              <TableRow class="bg-muted/30">
-                <TableCell>
-                  <div
-                    class="w-6 h-6 rounded-full"
-                    :style="{ backgroundColor: root.color ?? '#888' }"
-                  />
-                </TableCell>
-                <TableCell class="font-semibold">{{ root.name }}</TableCell>
-                <TableCell class="text-muted-foreground text-sm">{{ root.slug }}</TableCell>
-                <TableCell class="text-right">{{ root.question_count }}</TableCell>
-                <TableCell class="text-center">
-                  <Badge v-if="root.is_premium" variant="secondary">Premium</Badge>
-                </TableCell>
-                <TableCell class="text-center">
-                  <Switch
-                    :model-value="root.is_active"
-                    @update:model-value="toggleMutation.mutate({ id: root.id, active: $event as boolean })"
-                  />
-                </TableCell>
-                <TableCell class="text-right">
-                  <div class="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" title="Ajouter sous-catégorie" @click="openCreate(root.id)">
-                      <FolderPlus class="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" @click="openEdit(root)">
-                      <Pencil class="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" @click="deleteTarget = root">
-                      <Trash2 class="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-              <!-- Subcategories -->
-              <TableRow v-for="sub in subcategoriesOf(root.id)" :key="sub.id">
-                <TableCell>
-                  <div class="ml-4 w-4 h-4 rounded-full" :style="{ backgroundColor: sub.color ?? root.color ?? '#888' }" />
-                </TableCell>
-                <TableCell class="pl-8 text-sm">└ {{ sub.name }}</TableCell>
-                <TableCell class="text-muted-foreground text-sm">{{ sub.slug }}</TableCell>
-                <TableCell class="text-right">{{ sub.question_count }}</TableCell>
-                <TableCell class="text-center">
-                  <Badge v-if="sub.is_premium" variant="secondary">Premium</Badge>
-                </TableCell>
-                <TableCell class="text-center">
-                  <Switch
-                    :model-value="sub.is_active"
-                    @update:model-value="toggleMutation.mutate({ id: sub.id, active: $event as boolean })"
-                  />
-                </TableCell>
-                <TableCell class="text-right">
-                  <div class="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" @click="openEdit(sub)">
-                      <Pencil class="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" @click="deleteTarget = sub">
-                      <Trash2 class="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            </template>
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+    <DataTable
+      :data="flatRows"
+      :columns="columns"
+      :loading="isLoading"
+      search-placeholder="Rechercher une catégorie..."
+    >
+      <template #filters>
+          <Select v-model="filterStatus">
+            <SelectTrigger class="w-36"><SelectValue placeholder="Statut" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tous les statuts</SelectItem>
+              <SelectItem value="active">Actif</SelectItem>
+              <SelectItem value="inactive">Inactif</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select v-model="filterPremium">
+            <SelectTrigger class="w-36"><SelectValue placeholder="Type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tous les types</SelectItem>
+              <SelectItem value="premium">Premium</SelectItem>
+              <SelectItem value="free">Gratuit</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select v-model="filterLevel">
+            <SelectTrigger class="w-44"><SelectValue placeholder="Niveau" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Catégories et sous</SelectItem>
+              <SelectItem value="root">Catégories racines</SelectItem>
+              <SelectItem value="sub">Sous-catégories</SelectItem>
+            </SelectContent>
+          </Select>
+      </template>
+    </DataTable>
 
     <!-- ══ Create/Edit Dialog ══ -->
     <Dialog v-model:open="showDialog">
       <DialogContent class="max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {{ editingId ? 'Modifier la catégorie' : (form.parent_id ? 'Nouvelle sous-catégorie' : 'Nouvelle catégorie') }}
+            {{ editingId ? 'Modifier la catégorie' : (form.parent_id !== 'none' ? 'Nouvelle sous-catégorie' : 'Nouvelle catégorie') }}
           </DialogTitle>
         </DialogHeader>
 
@@ -364,14 +404,13 @@ interface CategoryRow {
     </Dialog>
 
     <!-- ══ Delete confirmation ══ -->
-    <AlertDialog :open="!!deleteTarget" @update:open="deleteTarget = null">
+    <AlertDialog :open="!!deleteTarget" @update:open="v => { if (!v) deleteTarget.value = null }">
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Supprimer « {{ deleteTarget?.name }} » ?</AlertDialogTitle>
           <AlertDialogDescription>
             <template v-if="!deleteTarget?.parent_id">
               Cette catégorie racine et toutes ses sous-catégories seront supprimées.
-              Les questions associées ne seront pas supprimées mais ne seront plus rattachées.
             </template>
             <template v-else>
               Cette sous-catégorie sera supprimée.
@@ -380,7 +419,7 @@ interface CategoryRow {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Annuler</AlertDialogCancel>
-          <AlertDialogAction @click="deleteMutation.mutate()">Supprimer</AlertDialogAction>
+          <Button variant="destructive" @click="confirmDelete">Supprimer</Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

@@ -36,6 +36,7 @@ const modalTab = ref<'create' | 'import-json' | 'import-csv'>('create')
 const form = ref(emptyForm())
 
 function emptyForm() {
+  const flavor = activeFlavor.value || 'ilmoo'
   return {
     question_text: '',
     answers: ['', '', '', ''],
@@ -43,7 +44,7 @@ function emptyForm() {
     category_id: '',
     difficulty: 'medium' as string,
     explanation: '',
-    flavor_ids: [activeFlavor.value] as string[],
+    flavor_ids: [flavor] as string[],
   }
 }
 
@@ -282,8 +283,8 @@ const importCsvMutation = useMutation({
               <div class="flex gap-4">
                 <label v-for="f in FLAVORS" :key="f.slug" class="flex items-center gap-2 cursor-pointer">
                   <Checkbox
-                    :checked="form.flavor_ids.includes(f.slug)"
-                    @update:checked="form.flavor_ids = form.flavor_ids.includes(f.slug) ? form.flavor_ids.filter(s => s !== f.slug) : [...form.flavor_ids, f.slug]"
+                    :model-value="form.flavor_ids.includes(f.slug)"
+                    @update:model-value="form.flavor_ids = form.flavor_ids.includes(f.slug) ? form.flavor_ids.filter(s => s !== f.slug) : [...form.flavor_ids, f.slug]"
                   />
                   <span class="text-sm">{{ f.label }}</span>
                 </label>
@@ -307,8 +308,8 @@ const importCsvMutation = useMutation({
                 <div class="flex gap-4">
                   <label v-for="f in FLAVORS" :key="f.slug" class="flex items-center gap-2 cursor-pointer">
                     <Checkbox
-                      :checked="importFlavorIds.includes(f.slug)"
-                      @update:checked="importFlavorIds = importFlavorIds.includes(f.slug) ? importFlavorIds.filter(s => s !== f.slug) : [...importFlavorIds, f.slug]"
+                      :model-value="importFlavorIds.includes(f.slug)"
+                      @update:model-value="importFlavorIds = importFlavorIds.includes(f.slug) ? importFlavorIds.filter(s => s !== f.slug) : [...importFlavorIds, f.slug]"
                     />
                     <span class="text-sm">{{ f.label }}</span>
                   </label>
@@ -343,8 +344,8 @@ const importCsvMutation = useMutation({
                 <div class="flex gap-4">
                   <label v-for="f in FLAVORS" :key="f.slug" class="flex items-center gap-2 cursor-pointer">
                     <Checkbox
-                      :checked="importFlavorIds.includes(f.slug)"
-                      @update:checked="importFlavorIds = importFlavorIds.includes(f.slug) ? importFlavorIds.filter(s => s !== f.slug) : [...importFlavorIds, f.slug]"
+                      :model-value="importFlavorIds.includes(f.slug)"
+                      @update:model-value="importFlavorIds = importFlavorIds.includes(f.slug) ? importFlavorIds.filter(s => s !== f.slug) : [...importFlavorIds, f.slug]"
                     />
                     <span class="text-sm">{{ f.label }}</span>
                   </label>

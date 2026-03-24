@@ -116,6 +116,13 @@ export async function importQuestions(questions: Record<string, unknown>[], flav
   })
 }
 
+export async function bulkUpdateQuestionFlavors(questionIds: string[], action: 'add' | 'remove', flavorSlugs: string[]) {
+  return request('/api/questions/bulk-flavors', {
+    method: 'PUT',
+    body: JSON.stringify({ question_ids: questionIds, action, flavor_slugs: flavorSlugs }),
+  })
+}
+
 // ── Categories ──
 
 export async function getCategories() {

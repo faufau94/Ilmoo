@@ -1,15 +1,11 @@
 /**
  * Seed app flavors (Ilmoo + QuizBattle).
- * Run with: npx tsx src/db/seed-flavors.ts
+ * Run standalone: npx tsx src/db/seed-flavors.ts
  */
-import { config as dotenvConfig } from 'dotenv';
-import { resolve } from 'node:path';
-dotenvConfig({ path: resolve(import.meta.dirname, '../../../.env') });
-import { db, appFlavors } from './index.js';
+import { db } from './index.js';
 import { sql } from 'drizzle-orm';
-import pool from './connection.js';
 
-async function seedFlavors() {
+export async function seedFlavors() {
   console.log('Seeding app flavors...');
 
   await db.execute(sql`
@@ -21,10 +17,15 @@ async function seedFlavors() {
   `);
 
   console.log('✓ App flavors ready (ilmoo + quizapp)');
-  await pool.end();
 }
 
-seedFlavors().catch((err) => {
-  console.error('Failed to seed flavors:', err);
-  process.exit(1);
-});
+// Standalone execution
+if (process.argv[1]?.includes('seed-flavors')) {
+  const { config: dotenvConfig } = await import('dotenv');
+  const { resolve } = await import('node:path');
+  dotenvConfig({ path: resolve(import.meta.dirname, '../../../.env') });
+  const pool = (await import('./connection.js')).default;
+  seedFlavors()
+    .then(() => pool.end())
+    .catch((err) => { console.error('Failed to seed flavors:', err); process.exit(1); });
+}

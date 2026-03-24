@@ -70,23 +70,6 @@ services:
     networks:
       - ilmoo-network
 
-  # ── Database seed (one-shot, runs then exits) ──
-  seed:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.seed
-    container_name: ilmoo-seed
-    restart: "no"
-    environment:
-      DATABASE_URL: postgresql://ilmoo:${DB_PASSWORD}@postgres:5432/ilmoo
-      ADMIN_EMAIL: ${ADMIN_EMAIL}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - ilmoo-network
-
   # ── Redis ──
   redis:
     image: redis:7-alpine

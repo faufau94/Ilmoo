@@ -3,8 +3,10 @@ import { ref, computed, h, watch } from 'vue'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import {
   getQuestions, getCategories, updateQuestion, deleteQuestion,
+  bulkUpdateQuestionFlavors,
 } from '@/lib/api'
 import { useToast } from '@/composables/useToast'
+import { useFlavor, FLAVORS } from '@/composables/useFlavor'
 import type { ColumnDef } from '@tanstack/vue-table'
 import DataTable from '@/components/DataTable.vue'
 import { Textarea } from '@/components/ui/textarea'
@@ -24,23 +26,34 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import SelectSearch from '@/components/ui/select/SelectSearch.vue'
-import { Pencil, Trash2 } from 'lucide-vue-next'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Pencil, Trash2, Plus, Minus } from 'lucide-vue-next'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 const toast = useToast()
 const queryClient = useQueryClient()
+const { activeFlavor } = useFlavor()
 
 const PAGE_SIZE = 50
 
 // ── Server-side filters + pagination ──
+const filterFlavor = ref<string>(activeFlavor.value)
 const filterCategory = ref('all')
 const filterDifficulty = ref('all')
+
+// Sync filterFlavor when activeFlavor changes globally
+watch(activeFlavor, (newFlavor) => {
+  filterFlavor.value = newFlavor
+})
 const filterVerified = ref('all')
 const filterPlayed = ref('all')
 const filterSuccess = ref('all')
 const currentPage = ref(0)
 
 // Reset page when filters change
-watch([filterCategory, filterDifficulty, filterVerified, filterPlayed, filterSuccess], () => {
+watch([filterFlavor, filterCategory, filterDifficulty, filterVerified, filterPlayed, filterSuccess], () => {
   currentPage.value = 0
 })
 
@@ -49,6 +62,7 @@ const queryParams = computed(() => {
     limit: String(PAGE_SIZE),
     offset: String(currentPage.value * PAGE_SIZE),
   }
+  if (filterFlavor.value !== 'all') p.flavorSlug = filterFlavor.value
   if (filterCategory.value !== 'all') p.categoryId = filterCategory.value
   if (filterDifficulty.value !== 'all') p.difficulty = filterDifficulty.value
   if (filterVerified.value !== 'all') p.isVerified = filterVerified.value
@@ -78,6 +92,37 @@ const categoryOptions = computed(() => [
   ...categories.value.map(c => ({ value: c.id, label: (c.parent_id ? '└ ' : '') + c.name })),
 ])
 
+// ── Selection ──
+const selectedIds = ref<Set<string>>(new Set())
+const allOnPageSelected = computed(() =>
+  questions.value.length > 0 && questions.value.every(q => selectedIds.value.has(q.id)),
+)
+function toggleAll() {
+  if (allOnPageSelected.value) {
+    questions.value.forEach(q => selectedIds.value.delete(q.id))
+  } else {
+    questions.value.forEach(q => selectedIds.value.add(q.id))
+  }
+}
+function toggleOne(id: string) {
+  if (selectedIds.value.has(id)) selectedIds.value.delete(id)
+  else selectedIds.value.add(id)
+}
+
+const bulkFlavorMutation = useMutation({
+  mutationFn: ({ action, slugs }: { action: 'add' | 'remove'; slugs: string[] }) =>
+    bulkUpdateQuestionFlavors([...selectedIds.value], action, slugs),
+  onSuccess: (_, { action, slugs }) => {
+    queryClient.invalidateQueries({ queryKey: ['questions'] })
+    const label = slugs.map(s => FLAVORS.find(f => f.slug === s)?.label ?? s).join(', ')
+    toast.success(action === 'add'
+      ? `${selectedIds.value.size} questions ajoutées à ${label}`
+      : `${selectedIds.value.size} questions retirées de ${label}`)
+    selectedIds.value = new Set()
+  },
+  onError: (err: Error) => toast.error('Erreur', err.message),
+})
+
 // ── Edit Dialog ──
 const editingId = ref<string | null>(null)
 const showEdit = ref(false)
@@ -88,6 +133,7 @@ const form = ref({
   category_id: '',
   difficulty: 'medium' as string,
   explanation: '',
+  flavor_ids: [] as string[],
 })
 
 function openEdit(q: QuestionRow) {
@@ -99,6 +145,7 @@ function openEdit(q: QuestionRow) {
     category_id: q.category_id,
     difficulty: q.difficulty,
     explanation: q.explanation ?? '',
+    flavor_ids: [...(q.flavor_slugs ?? [])],
   }
   showEdit.value = true
 }
@@ -176,6 +223,18 @@ function categoryName(id: string) {
 // ── TanStack columns ──
 const columns: ColumnDef<QuestionRow, unknown>[] = [
   {
+    id: 'select',
+    header: () => h(Checkbox, {
+      modelValue: allOnPageSelected.value,
+      'onUpdate:modelValue': () => toggleAll(),
+    }),
+    cell: ({ row }) => h(Checkbox, {
+      modelValue: selectedIds.value.has(row.original.id),
+      'onUpdate:modelValue': () => toggleOne(row.original.id),
+    }),
+    enableSorting: false,
+  },
+  {
     accessorKey: 'question_text',
     header: 'Question',
     cell: ({ row }) => h('span', { class: 'font-medium line-clamp-2 max-w-xs block' }, row.original.question_text),
@@ -202,6 +261,23 @@ const columns: ColumnDef<QuestionRow, unknown>[] = [
     id: 'success_rate',
     header: 'Réussite',
     cell: ({ row }) => h('span', { class: 'text-right block' }, successRate(row.original.times_played, row.original.times_correct)),
+  },
+  {
+    id: 'apps',
+    header: 'Apps',
+    cell: ({ row }) => {
+      const slugs = row.original.flavor_slugs ?? []
+      if (slugs.length === 0) return h('span', { class: 'text-muted-foreground text-xs' }, 'Aucune')
+      return h('div', { class: 'flex gap-1' },
+        slugs.map(s => {
+          const f = FLAVORS.find(fl => fl.slug === s)
+          return h('span', {
+            class: 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold text-white',
+            style: { backgroundColor: f?.color ?? '#666' },
+          }, f?.initials ?? s)
+        }),
+      )
+    },
   },
   {
     id: 'verified',
@@ -238,6 +314,7 @@ interface QuestionRow {
   is_active: boolean
   is_verified: boolean
   category_name?: string
+  flavor_slugs?: string[]
 }
 interface CategoryRow {
   id: string; name: string; slug: string; parent_id: string | null
@@ -246,9 +323,45 @@ interface CategoryRow {
 
 <template>
   <div class="p-8 space-y-6">
-    <div>
-      <h1 class="text-2xl font-bold">Questions</h1>
-      <p class="text-muted-foreground text-sm mt-1">{{ total }} questions</p>
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold">Questions</h1>
+        <p class="text-muted-foreground text-sm mt-1">{{ total }} questions</p>
+      </div>
+
+      <!-- Bulk actions bar -->
+      <div v-if="selectedIds.size > 0" class="flex items-center gap-2">
+        <span class="text-sm text-muted-foreground">{{ selectedIds.size }} sélectionnée(s)</span>
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <Button size="sm"><Plus class="h-4 w-4 mr-1" /> Ajouter à une app</Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem
+              v-for="f in FLAVORS" :key="f.slug"
+              @click="bulkFlavorMutation.mutate({ action: 'add', slugs: [f.slug] })"
+            >{{ f.label }}</DropdownMenuItem>
+            <DropdownMenuItem
+              @click="bulkFlavorMutation.mutate({ action: 'add', slugs: FLAVORS.map(f => f.slug) })"
+            >Toutes les apps</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <Button size="sm" variant="outline"><Minus class="h-4 w-4 mr-1" /> Retirer d'une app</Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem
+              v-for="f in FLAVORS" :key="f.slug"
+              @click="bulkFlavorMutation.mutate({ action: 'remove', slugs: [f.slug] })"
+            >{{ f.label }}</DropdownMenuItem>
+            <DropdownMenuItem
+              @click="bulkFlavorMutation.mutate({ action: 'remove', slugs: FLAVORS.map(f => f.slug) })"
+            >Toutes les apps</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button size="sm" variant="ghost" @click="selectedIds = new Set()">Désélectionner</Button>
+      </div>
     </div>
 
     <DataTable
@@ -262,6 +375,13 @@ interface CategoryRow {
       @update:server-page="currentPage = $event"
     >
       <template #filters>
+          <Select v-model="filterFlavor">
+            <SelectTrigger class="w-36"><SelectValue placeholder="Application" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Toutes les apps</SelectItem>
+              <SelectItem v-for="f in FLAVORS" :key="f.slug" :value="f.slug">{{ f.label }}</SelectItem>
+            </SelectContent>
+          </Select>
           <SelectSearch v-model="filterCategory" :options="categoryOptions" placeholder="Catégorie" trigger-class="w-48" />
           <Select v-model="filterDifficulty">
             <SelectTrigger class="w-36"><SelectValue placeholder="Difficulté" /></SelectTrigger>
@@ -348,6 +468,18 @@ interface CategoryRow {
           <div class="space-y-2">
             <Label>Explication (optionnel)</Label>
             <Textarea v-model="form.explanation" :rows="2" />
+          </div>
+          <div class="space-y-2">
+            <Label>Applications</Label>
+            <div class="flex gap-4">
+              <label v-for="f in FLAVORS" :key="f.slug" class="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  :model-value="form.flavor_ids.includes(f.slug)"
+                  @update:model-value="form.flavor_ids = form.flavor_ids.includes(f.slug) ? form.flavor_ids.filter(s => s !== f.slug) : [...form.flavor_ids, f.slug]"
+                />
+                <span class="text-sm">{{ f.label }}</span>
+              </label>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" type="button" @click="showEdit = false">Annuler</Button>

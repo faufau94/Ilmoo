@@ -11,6 +11,7 @@ import pool from './db/connection.js';
 import { db, appFlavors } from './db/index.js';
 import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { runSeeds } from './db/seed.js';
 import redis, { cacheFlavorConfig, getFlavorConfig } from './services/redis.js';
 import { verifyToken } from './services/firebase.js';
 import authPlugin from './middleware/auth.js';
@@ -177,6 +178,9 @@ const isMainModule = process.argv[1]?.includes('server');
 if (isMainModule) {
   // Run pending Drizzle migrations before starting
   await migrate(db, { migrationsFolder: './drizzle' });
+
+  // Run seeds (idempotent — uses ON CONFLICT, safe to re-run)
+  await runSeeds();
 
   const { fastify } = await buildApp();
   const port = Number(process.env['PORT']) || 3000;

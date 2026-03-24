@@ -1,13 +1,9 @@
 /**
  * Seed categories & subcategories (style QuizUp).
- * Run with: npx tsx src/db/seed-categories.ts
+ * Run standalone: npx tsx src/db/seed-categories.ts
  */
-import { config as dotenvConfig } from 'dotenv';
-import { resolve } from 'node:path';
-dotenvConfig({ path: resolve(import.meta.dirname, '../../../.env') });
 import { db } from './index.js';
 import { sql } from 'drizzle-orm';
-import pool from './connection.js';
 
 interface Category {
   name: string;
@@ -218,7 +214,7 @@ const categories: Category[] = [
   },
 ];
 
-async function seed() {
+export async function seedCategories() {
   console.log('Seeding categories...\n');
 
   let rootCount = 0;
@@ -257,10 +253,15 @@ async function seed() {
   }
 
   console.log(`\nDone: ${rootCount} catégories, ${subCount} sous-catégories.`);
-  await pool.end();
 }
 
-seed().catch((err) => {
-  console.error('Seed failed:', err);
-  process.exit(1);
-});
+// Standalone execution
+if (process.argv[1]?.includes('seed-categories')) {
+  const { config: dotenvConfig } = await import('dotenv');
+  const { resolve } = await import('node:path');
+  dotenvConfig({ path: resolve(import.meta.dirname, '../../../.env') });
+  const pool = (await import('./connection.js')).default;
+  seedCategories()
+    .then(() => pool.end())
+    .catch((err) => { console.error('Seed failed:', err); process.exit(1); });
+}

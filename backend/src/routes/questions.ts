@@ -11,7 +11,8 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
     Querystring: {
       categoryId?: string; difficulty?: string; search?: string;
       isVerified?: string; minPlayed?: string; minSuccessRate?: string;
-      maxSuccessRate?: string; limit?: string; offset?: string;
+      maxSuccessRate?: string; flavorSlug?: string;
+      limit?: string; offset?: string;
     };
   }>(
     '/api/questions',
@@ -27,6 +28,7 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
             minPlayed: { type: 'string', pattern: '^\\d+$' },
             minSuccessRate: { type: 'string', pattern: '^\\d+$' },
             maxSuccessRate: { type: 'string', pattern: '^\\d+$' },
+            flavorSlug: { type: 'string', maxLength: 50 },
             limit: { type: 'string', pattern: '^\\d+$' },
             offset: { type: 'string', pattern: '^\\d+$' },
           },
@@ -36,7 +38,7 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
     async (request) => {
       const {
         categoryId, difficulty, search,
-        isVerified, minPlayed, minSuccessRate, maxSuccessRate,
+        isVerified, minPlayed, minSuccessRate, maxSuccessRate, flavorSlug,
         limit: rawLimit, offset: rawOffset,
       } = request.query;
       const limit = Math.min(Number(rawLimit) || 20, 500);
@@ -51,6 +53,7 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
       if (minPlayed) conditions.push(sql`q.times_played >= ${Number(minPlayed)}`);
       if (minSuccessRate) conditions.push(sql`(q.times_played = 0 OR ROUND(q.times_correct::numeric / q.times_played * 100) >= ${Number(minSuccessRate)})`);
       if (maxSuccessRate) conditions.push(sql`(q.times_played > 0 AND ROUND(q.times_correct::numeric / q.times_played * 100) <= ${Number(maxSuccessRate)})`);
+      if (flavorSlug) conditions.push(sql`EXISTS (SELECT 1 FROM question_flavors qf WHERE qf.question_id = q.id AND qf.flavor_slug = ${flavorSlug})`);
 
       const where = sql.join(conditions, sql` AND `);
 
@@ -58,7 +61,11 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
       const total = Number((countResult.rows[0] as Record<string, unknown>)?.total ?? 0);
 
       const result = await db.execute(sql`
-        SELECT q.*, c.name as category_name, c.slug as category_slug
+        SELECT q.*, c.name as category_name, c.slug as category_slug,
+          COALESCE(
+            (SELECT array_agg(qf.flavor_slug) FROM question_flavors qf WHERE qf.question_id = q.id),
+            ARRAY[]::varchar[]
+          ) as flavor_slugs
         FROM questions q
         JOIN categories c ON c.id = q.category_id
         WHERE ${where}
@@ -506,6 +513,55 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
         success: true,
         data: { imported, errors: errors.length > 0 ? errors : undefined },
       };
+    },
+  );
+
+  // ════════════════════════════════════════
+  // PUT /api/questions/bulk-flavors — admin only
+  // Assign or remove flavor associations in bulk
+  // ════════════════════════════════════════
+  fastify.put<{
+    Body: {
+      question_ids: string[];
+      action: 'add' | 'remove';
+      flavor_slugs: string[];
+    };
+  }>(
+    '/api/questions/bulk-flavors',
+    {
+      preHandler: requireAdmin,
+      schema: {
+        body: {
+          type: 'object' as const,
+          required: ['question_ids', 'action', 'flavor_slugs'],
+          properties: {
+            question_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1, maxItems: 500 },
+            action: { type: 'string', enum: ['add', 'remove'] },
+            flavor_slugs: { type: 'array', items: { type: 'string', maxLength: 50 }, minItems: 1 },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { question_ids, action, flavor_slugs } = request.body;
+
+      if (action === 'add') {
+        const values = question_ids.flatMap((qId) =>
+          flavor_slugs.map((slug) => ({ questionId: qId, flavorSlug: slug })),
+        );
+        await db
+          .insert(questionFlavors)
+          .values(values)
+          .onConflictDoNothing();
+      } else {
+        await db.execute(sql`
+          DELETE FROM question_flavors
+          WHERE question_id = ANY(${question_ids})
+            AND flavor_slug = ANY(${flavor_slugs})
+        `);
+      }
+
+      return { success: true, data: { updated: question_ids.length } };
     },
   );
 };

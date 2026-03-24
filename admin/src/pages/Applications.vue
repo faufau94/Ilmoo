@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
-import { getFlavors, getFlavor, updateFlavor, getCategories } from '@/lib/api'
+import { getFlavors, getFlavor, updateFlavor, getCategories, bulkUpdateCategoryFlavors } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -65,43 +65,46 @@ function cancelEdit() {
   form.value = {}
 }
 
-// ── Category checkboxes ──
-const enabledCatIds = computed({
-  get: () => (form.value.enabled_category_ids as string[] | null) ?? null,
-  set: (val) => { form.value.enabled_category_ids = val },
+// ── Category checkboxes (using category_flavors) ──
+const flavorCategories = computed(() => {
+  if (!editingSlug.value) return []
+  return allCategories.value.filter(c => (c.flavor_slugs ?? []).includes(editingSlug.value!))
+})
+
+function isCatEnabled(catId: string) {
+  return flavorCategories.value.some(c => c.id === catId)
+}
+
+const categoryFlavorMutation = useMutation({
+  mutationFn: ({ categoryId, action }: { categoryId: string; action: 'add' | 'remove' }) =>
+    bulkUpdateCategoryFlavors([categoryId], action, [editingSlug.value!]),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['categories-all'] })
+  },
 })
 
 function toggleCategory(catId: string) {
-  const current = enabledCatIds.value
-  if (current === null) {
-    // Was "all" → switch to all-except-this
-    const allIds = allCategories.value.filter(c => !c.parent_id).map(c => c.id)
-    enabledCatIds.value = allIds.filter(id => id !== catId)
-  } else if (current.includes(catId)) {
-    const newList = current.filter(id => id !== catId)
-    enabledCatIds.value = newList.length === 0 ? [] : newList
-  } else {
-    const newList = [...current, catId]
-    // If all root categories selected, set to null (= all)
-    const rootIds = allCategories.value.filter(c => !c.parent_id).map(c => c.id)
-    if (rootIds.every(id => newList.includes(id))) {
-      enabledCatIds.value = null
-    } else {
-      enabledCatIds.value = newList
-    }
+  const action = isCatEnabled(catId) ? 'remove' : 'add'
+  categoryFlavorMutation.mutate({ categoryId: catId, action })
+}
+
+async function selectAllCats() {
+  const rootIds = allCategories.value.filter(c => !c.parent_id).map(c => c.id)
+  const subIds = allCategories.value.filter(c => c.parent_id).map(c => c.id)
+  const allIds = [...rootIds, ...subIds]
+  const toAdd = allIds.filter(id => !isCatEnabled(id))
+  if (toAdd.length > 0) {
+    await bulkUpdateCategoryFlavors(toAdd, 'add', [editingSlug.value!])
+    queryClient.invalidateQueries({ queryKey: ['categories-all'] })
   }
 }
 
-function isCatEnabled(catId: string) {
-  return enabledCatIds.value === null || enabledCatIds.value.includes(catId)
-}
-
-function selectAllCats() {
-  enabledCatIds.value = null
-}
-
-function deselectAllCats() {
-  enabledCatIds.value = []
+async function deselectAllCats() {
+  const enabledIds = flavorCategories.value.map(c => c.id)
+  if (enabledIds.length > 0) {
+    await bulkUpdateCategoryFlavors(enabledIds, 'remove', [editingSlug.value!])
+    queryClient.invalidateQueries({ queryKey: ['categories-all'] })
+  }
 }
 
 // ── Text keys ──
@@ -147,6 +150,7 @@ interface CategoryRow {
   slug: string
   parent_id: string | null
   question_count: number
+  flavor_slugs?: string[]
 }
 </script>
 
@@ -315,25 +319,41 @@ interface CategoryRow {
               </div>
             </div>
             <CardDescription>
-              {{ enabledCatIds === null ? 'Toutes les catégories sont activées' : `${enabledCatIds.length} catégorie(s) activée(s)` }}
+              {{ flavorCategories.length }} catégorie(s) / sous-catégorie(s) activée(s)
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div class="space-y-2">
-              <label
-                v-for="cat in allCategories.filter(c => !c.parent_id)"
-                :key="cat.id"
-                class="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 cursor-pointer"
-              >
-                <div class="flex items-center gap-3">
-                  <Checkbox
-                    :checked="isCatEnabled(cat.id)"
-                    @update:checked="toggleCategory(cat.id)"
-                  />
-                  <span class="text-sm font-medium">{{ cat.name }}</span>
-                </div>
-                <span class="text-xs text-muted-foreground">{{ cat.question_count }} questions</span>
-              </label>
+            <div class="space-y-1">
+              <template v-for="cat in allCategories.filter(c => !c.parent_id)" :key="cat.id">
+                <!-- Root category -->
+                <label
+                  class="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 cursor-pointer"
+                >
+                  <div class="flex items-center gap-3">
+                    <Checkbox
+                      :checked="isCatEnabled(cat.id)"
+                      @update:checked="toggleCategory(cat.id)"
+                    />
+                    <span class="text-sm font-medium">{{ cat.name }}</span>
+                  </div>
+                  <span class="text-xs text-muted-foreground">{{ cat.question_count }} questions</span>
+                </label>
+                <!-- Subcategories -->
+                <label
+                  v-for="sub in allCategories.filter(c => c.parent_id === cat.id)"
+                  :key="sub.id"
+                  class="flex items-center justify-between pl-10 pr-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer"
+                >
+                  <div class="flex items-center gap-3">
+                    <Checkbox
+                      :checked="isCatEnabled(sub.id)"
+                      @update:checked="toggleCategory(sub.id)"
+                    />
+                    <span class="text-sm text-muted-foreground">└ {{ sub.name }}</span>
+                  </div>
+                  <span class="text-xs text-muted-foreground">{{ sub.question_count }} questions</span>
+                </label>
+              </template>
             </div>
           </CardContent>
         </Card>

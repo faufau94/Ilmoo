@@ -535,7 +535,7 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
           type: 'object' as const,
           required: ['question_ids', 'action', 'flavor_slugs'],
           properties: {
-            question_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1, maxItems: 500 },
+            question_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1, maxItems: 10000 },
             action: { type: 'string', enum: ['add', 'remove'] },
             flavor_slugs: { type: 'array', items: { type: 'string', maxLength: 50 }, minItems: 1 },
           },
@@ -554,14 +554,117 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
           .values(values)
           .onConflictDoNothing();
       } else {
+        const qIdArray = `{${question_ids.join(',')}}`;
+        const slugArray = `{${flavor_slugs.join(',')}}`;
         await db.execute(sql`
           DELETE FROM question_flavors
-          WHERE question_id = ANY(${question_ids})
-            AND flavor_slug = ANY(${flavor_slugs})
+          WHERE question_id = ANY(${qIdArray}::uuid[])
+            AND flavor_slug = ANY(${slugArray}::varchar[])
         `);
       }
 
       return { success: true, data: { updated: question_ids.length } };
+    },
+  );
+
+  // ════════════════════════════════════════
+  // DELETE /api/questions/bulk — admin only (soft delete multiple)
+  // ════════════════════════════════════════
+  fastify.delete<{
+    Body: { question_ids: string[] };
+  }>(
+    '/api/questions/bulk',
+    {
+      preHandler: requireAdmin,
+      schema: {
+        body: {
+          type: 'object' as const,
+          required: ['question_ids'],
+          properties: {
+            question_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1, maxItems: 10000 },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { question_ids } = request.body;
+      const idArray = `{${question_ids.join(',')}}`;
+
+      // Get category counts for affected questions before deleting
+      const affectedQuestions = await db.execute(sql`
+        SELECT category_id, COUNT(*)::int as cnt
+        FROM questions
+        WHERE id = ANY(${idArray}::uuid[]) AND is_active = true
+        GROUP BY category_id
+      `);
+
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`
+          UPDATE questions SET is_active = false WHERE id = ANY(${idArray}::uuid[]) AND is_active = true
+        `);
+
+        for (const row of affectedQuestions.rows as { category_id: string; cnt: number }[]) {
+          await tx.update(categories).set({
+            questionCount: sql`GREATEST(${categories.questionCount} - ${row.cnt}, 0)`,
+          }).where(eq(categories.id, row.category_id));
+        }
+      });
+
+      return { success: true, data: { deleted: question_ids.length } };
+    },
+  );
+
+  // ════════════════════════════════════════
+  // GET /api/questions/ids — get all IDs matching current filters (for "select all")
+  // ════════════════════════════════════════
+  fastify.get<{
+    Querystring: {
+      categoryId?: string; difficulty?: string; search?: string;
+      isVerified?: string; minPlayed?: string; minSuccessRate?: string;
+      maxSuccessRate?: string; flavorSlug?: string;
+    };
+  }>(
+    '/api/questions/ids',
+    {
+      preHandler: requireAdmin,
+      schema: {
+        querystring: {
+          type: 'object' as const,
+          properties: {
+            categoryId: { type: 'string', format: 'uuid' },
+            difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] },
+            search: { type: 'string', maxLength: 200 },
+            isVerified: { type: 'string', enum: ['true', 'false'] },
+            minPlayed: { type: 'string', pattern: '^\\d+$' },
+            minSuccessRate: { type: 'string', pattern: '^\\d+$' },
+            maxSuccessRate: { type: 'string', pattern: '^\\d+$' },
+            flavorSlug: { type: 'string', maxLength: 50 },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const {
+        categoryId, difficulty, search,
+        isVerified, minPlayed, minSuccessRate, maxSuccessRate, flavorSlug,
+      } = request.query;
+
+      const conditions: ReturnType<typeof sql>[] = [sql`q.is_active = true`];
+      if (categoryId) conditions.push(sql`q.category_id = ${categoryId}`);
+      if (difficulty) conditions.push(sql`q.difficulty = ${difficulty}`);
+      if (search) conditions.push(sql`(q.question_text ILIKE ${`%${search}%`} OR q.answers::text ILIKE ${`%${search}%`})`);
+      if (isVerified !== undefined) conditions.push(sql`q.is_verified = ${isVerified === 'true'}`);
+      if (minPlayed) conditions.push(sql`q.times_played >= ${Number(minPlayed)}`);
+      if (minSuccessRate) conditions.push(sql`(q.times_played = 0 OR ROUND(q.times_correct::numeric / q.times_played * 100) >= ${Number(minSuccessRate)})`);
+      if (maxSuccessRate) conditions.push(sql`(q.times_played > 0 AND ROUND(q.times_correct::numeric / q.times_played * 100) <= ${Number(maxSuccessRate)})`);
+      if (flavorSlug) conditions.push(sql`EXISTS (SELECT 1 FROM question_flavors qf WHERE qf.question_id = q.id AND qf.flavor_slug = ${flavorSlug})`);
+
+      const where = sql.join(conditions, sql` AND `);
+
+      const result = await db.execute(sql`SELECT q.id FROM questions q WHERE ${where}`);
+      const ids = (result.rows as { id: string }[]).map(r => r.id);
+
+      return { success: true, data: ids };
     },
   );
 };

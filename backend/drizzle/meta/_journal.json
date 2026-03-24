@@ -15,6 +15,13 @@
       "when": 1774364214578,
       "tag": "0001_adorable_snowbird",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774371735127,
+      "tag": "0003_red_living_mummy",
+      "breakpoints": true
     }
   ]
 }

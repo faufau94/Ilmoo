@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import { eq, and, sql, desc } from 'drizzle-orm';
-import { db, users, adminSessions, categories, questions, matches, tournaments, reports, appFlavors } from '../db/index.js';
+import { db, users, adminSessions, categories, questions, matches, tournaments, reports, appFlavors, categoryFlavors } from '../db/index.js';
 import { requireAdmin } from '../middleware/admin.js';
 import redis from '../services/redis.js';
 
@@ -68,7 +68,11 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
       const result = await db.execute(sql`
         SELECT c.*,
           (SELECT COUNT(*) FROM categories sub WHERE sub.parent_id = c.id) as subcategories_count,
-          (SELECT COUNT(*) FROM questions q WHERE q.category_id = c.id AND q.is_active = true) as question_count
+          (SELECT COUNT(*) FROM questions q WHERE q.category_id = c.id AND q.is_active = true) as question_count,
+          COALESCE(
+            (SELECT array_agg(cf.flavor_slug) FROM category_flavors cf WHERE cf.category_id = c.id),
+            ARRAY[]::varchar[]
+          ) as flavor_slugs
         FROM categories c
         ORDER BY c.parent_id NULLS FIRST, c.sort_order, c.name
       `);
@@ -599,6 +603,58 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
         await redis.del(`config:${slug}`);
 
         return { success: true, data: updated[0] };
+      },
+    );
+
+    // PUT /api/admin/categories/bulk-flavors — assign/remove flavor associations for categories
+    f.put<{
+      Body: {
+        category_ids: string[];
+        action: 'add' | 'remove';
+        flavor_slugs: string[];
+      };
+    }>(
+      '/api/admin/categories/bulk-flavors',
+      {
+        schema: {
+          body: {
+            type: 'object' as const,
+            required: ['category_ids', 'action', 'flavor_slugs'],
+            properties: {
+              category_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1, maxItems: 500 },
+              action: { type: 'string', enum: ['add', 'remove'] },
+              flavor_slugs: { type: 'array', items: { type: 'string', maxLength: 50 }, minItems: 1 },
+            },
+          },
+        },
+      },
+      async (request) => {
+        const { category_ids, action, flavor_slugs } = request.body;
+
+        if (action === 'add') {
+          const values = category_ids.flatMap((catId) =>
+            flavor_slugs.map((slug) => ({ categoryId: catId, flavorSlug: slug })),
+          );
+          await db
+            .insert(categoryFlavors)
+            .values(values)
+            .onConflictDoNothing();
+        } else {
+          const catIdArray = `{${category_ids.join(',')}}`;
+          const slugArray = `{${flavor_slugs.join(',')}}`;
+          await db.execute(sql`
+            DELETE FROM category_flavors
+            WHERE category_id = ANY(${catIdArray}::uuid[])
+              AND flavor_slug = ANY(${slugArray}::varchar[])
+          `);
+        }
+
+        // Invalidate config cache for affected flavors
+        for (const slug of flavor_slugs) {
+          await redis.del(`config:${slug}`);
+        }
+
+        return { success: true, data: { updated: category_ids.length } };
       },
     );
 

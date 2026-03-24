@@ -172,6 +172,17 @@ export const questionFlavors = pgTable('question_flavors', {
   index('idx_question_flavors_question').on(t.questionId),
 ]);
 
+// ── Category Flavors (many-to-many) ──
+
+export const categoryFlavors = pgTable('category_flavors', {
+  categoryId: uuid('category_id').notNull().references(() => categories.id, { onDelete: 'cascade' }),
+  flavorSlug: varchar('flavor_slug', { length: 50 }).notNull().references(() => appFlavors.slug, { onDelete: 'cascade' }),
+}, (t) => [
+  primaryKey({ columns: [t.categoryId, t.flavorSlug] }),
+  index('idx_category_flavors_slug').on(t.flavorSlug),
+  index('idx_category_flavors_category').on(t.categoryId),
+]);
+
 // ── Tournaments ──
 
 export const tournaments = pgTable('tournaments', {

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, h } from 'vue'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
-import { getCategories, createCategory, updateCategory, deleteCategory } from '@/lib/api'
+import { getCategories, createCategory, updateCategory, deleteCategory, bulkUpdateCategoryFlavors } from '@/lib/api'
 import { useToast } from '@/composables/useToast'
+import { useFlavor, FLAVORS } from '@/composables/useFlavor'
 import type { ColumnDef } from '@tanstack/vue-table'
 import DataTable from '@/components/DataTable.vue'
 import { Card, CardContent } from '@/components/ui/card'
@@ -23,6 +24,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Plus, Pencil, Trash2, FolderPlus } from 'lucide-vue-next'
+import { Checkbox } from '@/components/ui/checkbox'
 
 const toast = useToast()
 const queryClient = useQueryClient()
@@ -39,6 +41,7 @@ const rootCategories = computed(() => allCategories.value.filter(c => !c.parent_
 const filterStatus = ref('all')   // all | active | inactive
 const filterPremium = ref('all')  // all | premium | free
 const filterLevel = ref('all')    // all | root | sub
+const filterApp = ref('all')      // all | ilmoo | quizapp
 
 // Flat list for the DataTable (root + subcategories interleaved)
 const flatRows = computed<CategoryRow[]>(() => {
@@ -75,6 +78,7 @@ function matchesFilters(cat: CategoryRow) {
   if (filterStatus.value === 'inactive' && cat.is_active) return false
   if (filterPremium.value === 'premium' && !cat.is_premium) return false
   if (filterPremium.value === 'free' && cat.is_premium) return false
+  if (filterApp.value !== 'all' && !(cat.flavor_slugs ?? []).includes(filterApp.value)) return false
   return true
 }
 
@@ -185,6 +189,29 @@ const toggleMutation = useMutation({
   },
 })
 
+// ── Category-Flavor toggle ──
+const flavorToggleMutation = useMutation({
+  mutationFn: ({ categoryId, flavorSlug, action }: { categoryId: string; flavorSlug: string; action: 'add' | 'remove' }) =>
+    bulkUpdateCategoryFlavors([categoryId], action, [flavorSlug]),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['categories-all'] })
+  },
+  onError: (err: Error) => toast.error('Erreur', err.message),
+})
+
+function isCategoryInFlavor(cat: CategoryRow, flavorSlug: string): boolean {
+  return (cat.flavor_slugs ?? []).includes(flavorSlug)
+}
+
+function toggleCategoryFlavor(cat: CategoryRow, flavorSlug: string) {
+  const isIn = isCategoryInFlavor(cat, flavorSlug)
+  flavorToggleMutation.mutate({
+    categoryId: cat.id,
+    flavorSlug,
+    action: isIn ? 'remove' : 'add',
+  })
+}
+
 // ── TanStack Table columns ──
 const columns: ColumnDef<CategoryRow, unknown>[] = [
   {
@@ -221,6 +248,18 @@ const columns: ColumnDef<CategoryRow, unknown>[] = [
       ? h(Badge, { variant: 'secondary' }, () => 'Premium')
       : null,
   },
+  ...FLAVORS.map(flavor => ({
+    id: `flavor-${flavor.slug}`,
+    header: () => h('span', {
+      class: 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold text-white',
+      style: { backgroundColor: flavor.color },
+    }, flavor.initials),
+    cell: ({ row }: { row: { original: CategoryRow } }) => h(Checkbox, {
+      modelValue: isCategoryInFlavor(row.original, flavor.slug),
+      'onUpdate:modelValue': () => toggleCategoryFlavor(row.original, flavor.slug),
+    }),
+    enableSorting: false,
+  } as ColumnDef<CategoryRow, unknown>)),
   {
     id: 'active',
     header: 'Actif',
@@ -266,6 +305,7 @@ interface CategoryRow {
   is_active: boolean
   sort_order: number
   question_count: number
+  flavor_slugs?: string[]
 }
 </script>
 
@@ -291,6 +331,13 @@ interface CategoryRow {
       search-placeholder="Rechercher une catégorie..."
     >
       <template #filters>
+          <Select v-model="filterApp">
+            <SelectTrigger class="w-36"><SelectValue placeholder="Application" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Toutes les apps</SelectItem>
+              <SelectItem v-for="f in FLAVORS" :key="f.slug" :value="f.slug">{{ f.label }}</SelectItem>
+            </SelectContent>
+          </Select>
           <Select v-model="filterStatus">
             <SelectTrigger class="w-36"><SelectValue placeholder="Statut" /></SelectTrigger>
             <SelectContent>
@@ -404,7 +451,7 @@ interface CategoryRow {
     </Dialog>
 
     <!-- ══ Delete confirmation ══ -->
-    <AlertDialog :open="!!deleteTarget" @update:open="v => { if (!v) deleteTarget.value = null }">
+    <AlertDialog :open="!!deleteTarget" @update:open="(v: boolean) => { if (!v) deleteTarget = null }">
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Supprimer « {{ deleteTarget?.name }} » ?</AlertDialogTitle>

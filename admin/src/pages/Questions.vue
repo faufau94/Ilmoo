@@ -3,7 +3,7 @@ import { ref, computed, h, watch } from 'vue'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import {
   getQuestions, getCategories, updateQuestion, deleteQuestion,
-  bulkUpdateQuestionFlavors,
+  bulkUpdateQuestionFlavors, bulkDeleteQuestions, getQuestionIds,
 } from '@/lib/api'
 import { useToast } from '@/composables/useToast'
 import { useFlavor, FLAVORS } from '@/composables/useFlavor'
@@ -98,12 +98,16 @@ const categoryOptions = computed(() => [
 
 // ── Selection ──
 const selectedIds = ref<Set<string>>(new Set())
+const allFilteredSelected = ref(false)
+const selectingAll = ref(false)
+
 const allOnPageSelected = computed(() =>
   questions.value.length > 0 && questions.value.every(q => selectedIds.value.has(q.id)),
 )
 function toggleAll() {
   if (allOnPageSelected.value) {
     questions.value.forEach(q => selectedIds.value.delete(q.id))
+    allFilteredSelected.value = false
   } else {
     questions.value.forEach(q => selectedIds.value.add(q.id))
   }
@@ -111,6 +115,35 @@ function toggleAll() {
 function toggleOne(id: string) {
   if (selectedIds.value.has(id)) selectedIds.value.delete(id)
   else selectedIds.value.add(id)
+  allFilteredSelected.value = false
+}
+function clearSelection() {
+  selectedIds.value = new Set()
+  allFilteredSelected.value = false
+}
+
+async function selectAllFiltered() {
+  selectingAll.value = true
+  try {
+    // Build params without limit/offset
+    const p: Record<string, string> = {}
+    if (filterFlavor.value !== 'all') p.flavorSlug = filterFlavor.value
+    if (filterCategory.value !== 'all') p.categoryId = filterCategory.value
+    if (filterDifficulty.value !== 'all') p.difficulty = filterDifficulty.value
+    if (filterVerified.value !== 'all') p.isVerified = filterVerified.value
+    if (filterPlayed.value !== 'all') p.minPlayed = filterPlayed.value
+    if (filterSuccess.value === 'low') p.maxSuccessRate = '40'
+    if (filterSuccess.value === 'high') p.minSuccessRate = '80'
+
+    const result = await getQuestionIds(p)
+    const ids = result.data ?? []
+    selectedIds.value = new Set(ids)
+    allFilteredSelected.value = true
+  } catch (err) {
+    toast.error('Erreur', (err as Error).message)
+  } finally {
+    selectingAll.value = false
+  }
 }
 
 const bulkFlavorMutation = useMutation({
@@ -122,7 +155,20 @@ const bulkFlavorMutation = useMutation({
     toast.success(action === 'add'
       ? `${selectedIds.value.size} questions ajoutées à ${label}`
       : `${selectedIds.value.size} questions retirées de ${label}`)
-    selectedIds.value = new Set()
+    clearSelection()
+  },
+  onError: (err: Error) => toast.error('Erreur', err.message),
+})
+
+// ── Bulk delete ──
+const showBulkDelete = ref(false)
+const bulkDeleteMutation = useMutation({
+  mutationFn: () => bulkDeleteQuestions([...selectedIds.value]),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['questions'] })
+    toast.success(`${selectedIds.value.size} questions supprimées`)
+    clearSelection()
+    showBulkDelete.value = false
   },
   onError: (err: Error) => toast.error('Erreur', err.message),
 })
@@ -362,7 +408,17 @@ interface CategoryRow {
 
       <!-- Bulk actions bar -->
       <div v-if="selectedIds.size > 0" class="flex items-center gap-2">
-        <span class="text-sm text-muted-foreground">{{ selectedIds.size }} sélectionnée(s)</span>
+        <span class="text-sm text-muted-foreground">
+          {{ selectedIds.size }} sélectionnée(s)
+          <template v-if="allFilteredSelected"> (toutes)</template>
+        </span>
+
+        <template v-if="!allFilteredSelected && total > PAGE_SIZE">
+          <Button size="sm" variant="link" @click="selectAllFiltered" :disabled="selectingAll">
+            {{ selectingAll ? 'Chargement...' : `Sélectionner les ${total} questions filtrées` }}
+          </Button>
+        </template>
+
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
             <Button size="sm"><Plus class="h-4 w-4 mr-1" /> Ajouter à une app</Button>
@@ -391,7 +447,10 @@ interface CategoryRow {
             >Toutes les apps</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button size="sm" variant="ghost" @click="selectedIds = new Set()">Désélectionner</Button>
+        <Button size="sm" variant="destructive" @click="showBulkDelete = true">
+          <Trash2 class="h-4 w-4 mr-1" /> Supprimer
+        </Button>
+        <Button size="sm" variant="ghost" @click="clearSelection">Désélectionner</Button>
       </div>
     </div>
 
@@ -533,6 +592,24 @@ interface CategoryRow {
         <AlertDialogFooter>
           <AlertDialogCancel>Annuler</AlertDialogCancel>
           <Button variant="destructive" @click="confirmDelete">Supprimer</Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <!-- ══ Bulk Delete confirmation ══ -->
+    <AlertDialog :open="showBulkDelete" @update:open="(v) => { if (!v) showBulkDelete = false }">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Supprimer {{ selectedIds.size }} questions ?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Ces questions n'apparaîtront plus dans les matchs. Cette action est irréversible.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Annuler</AlertDialogCancel>
+          <Button variant="destructive" @click="bulkDeleteMutation.mutate()" :disabled="bulkDeleteMutation.isPending.value">
+            {{ bulkDeleteMutation.isPending.value ? 'Suppression...' : 'Supprimer' }}
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

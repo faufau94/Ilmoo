@@ -123,6 +123,20 @@ export async function bulkUpdateQuestionFlavors(questionIds: string[], action: '
   })
 }
 
+export async function bulkDeleteQuestions(questionIds: string[]) {
+  return request('/api/questions/bulk', {
+    method: 'DELETE',
+    body: JSON.stringify({ question_ids: questionIds }),
+  })
+}
+
+export async function getQuestionIds(params?: Record<string, string>) {
+  const query = params ? '?' + new URLSearchParams(params).toString() : ''
+  return request<{ success: boolean; data: string[] }>(
+    `/api/questions/ids${query}`,
+  )
+}
+
 // ── Categories ──
 
 export async function getCategories() {
@@ -145,6 +159,13 @@ export async function updateCategory(id: string, body: Record<string, unknown>) 
 
 export async function deleteCategory(id: string) {
   return request(`/api/categories/${id}`, { method: 'DELETE' })
+}
+
+export async function bulkUpdateCategoryFlavors(categoryIds: string[], action: 'add' | 'remove', flavorSlugs: string[]) {
+  return request('/api/admin/categories/bulk-flavors', {
+    method: 'PUT',
+    body: JSON.stringify({ category_ids: categoryIds, action, flavor_slugs: flavorSlugs }),
+  })
 }
 
 // ── Reports ──

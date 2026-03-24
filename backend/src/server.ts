@@ -8,8 +8,8 @@ import { Server as SocketIOServer } from 'socket.io';
 import path from 'node:path';
 import { readdir } from 'node:fs/promises';
 import pool from './db/connection.js';
-import { db, appFlavors } from './db/index.js';
-import { eq } from 'drizzle-orm';
+import { db, appFlavors, categoryFlavors } from './db/index.js';
+import { eq, sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { runSeeds } from './db/seed.js';
 import redis, { cacheFlavorConfig, getFlavorConfig } from './services/redis.js';
@@ -122,7 +122,6 @@ export async function buildApp(options?: { logger?: boolean }) {
           primaryDark: appFlavors.primaryDark,
           accentPositive: appFlavors.accentPositive,
           accentNegative: appFlavors.accentNegative,
-          enabledCategoryIds: appFlavors.enabledCategoryIds,
           adsEnabled: appFlavors.adsEnabled,
           premiumEnabled: appFlavors.premiumEnabled,
           tournamentsEnabled: appFlavors.tournamentsEnabled,
@@ -145,7 +144,17 @@ export async function buildApp(options?: { logger?: boolean }) {
         });
       }
 
-      const data = row;
+      // Derive enabledCategoryIds from category_flavors table
+      const catFlavorRows = await db
+        .select({ categoryId: categoryFlavors.categoryId })
+        .from(categoryFlavors)
+        .where(eq(categoryFlavors.flavorSlug, flavorSlug));
+
+      const enabledCategoryIds = catFlavorRows.length > 0
+        ? catFlavorRows.map(r => r.categoryId)
+        : null; // null = all categories
+
+      const data = { ...row, enabledCategoryIds };
 
       // Cache in Redis for 5 minutes
       await cacheFlavorConfig(flavorSlug, data);

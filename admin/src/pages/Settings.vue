@@ -33,20 +33,43 @@ const { data: categoriesData } = useQuery({
 })
 const allCategories = computed(() => (categoriesData.value?.data ?? []) as CategoryRow[])
 
+// Key converters (API returns camelCase, template uses snake_case)
+function camelToSnake(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    result[key.replace(/[A-Z]/g, l => `_${l.toLowerCase()}`)] = value
+  }
+  return result
+}
+function snakeToCamel(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    result[key.replace(/_([a-z])/g, (_, l) => l.toUpperCase())] = value
+  }
+  return result
+}
+
 // Forms keyed by slug
 const forms = ref<Record<string, Record<string, unknown>>>({ ilmoo: {}, quizapp: {} })
 
 const { data: ilmooData } = useQuery({ queryKey: ['flavor', 'ilmoo'], queryFn: () => getFlavor('ilmoo') })
 const { data: quizappData } = useQuery({ queryKey: ['flavor', 'quizapp'], queryFn: () => getFlavor('quizapp') })
 
-watch(ilmooData, (v) => { if (v?.data) forms.value.ilmoo = { ...(v.data as Record<string, unknown>) } })
-watch(quizappData, (v) => { if (v?.data) forms.value.quizapp = { ...(v.data as Record<string, unknown>) } })
+watch(ilmooData, (v) => { if (v?.data) forms.value.ilmoo = camelToSnake(v.data as Record<string, unknown>) }, { immediate: true })
+watch(quizappData, (v) => { if (v?.data) forms.value.quizapp = camelToSnake(v.data as Record<string, unknown>) }, { immediate: true })
 
 const toast = useToast()
 
+const readOnlyKeys = new Set(['id', 'slug', 'created_at', 'updated_at'])
+
 function makeSaveMutation(s: string) {
   return useMutation({
-    mutationFn: () => updateFlavor(s, forms.value[s]!),
+    mutationFn: () => {
+      const payload = Object.fromEntries(
+        Object.entries(forms.value[s]!).filter(([k]) => !readOnlyKeys.has(k))
+      )
+      return updateFlavor(s, payload)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['flavor', s] })
       toast.success('Paramètres enregistrés')

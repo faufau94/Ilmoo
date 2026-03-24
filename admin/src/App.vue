@@ -6,7 +6,8 @@ import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/s
 import { Separator } from '@/components/ui/separator'
 import AppSidebar from '@/components/AppSidebar.vue'
 import QuestionDialog from '@/components/QuestionDialog.vue'
-import { Toaster } from 'vue-sonner'
+import 'vue-sonner/style.css'
+import { Toaster } from '@/components/ui/sonner'
 
 const route = useRoute()
 const { isAuthenticated } = useAuth()
@@ -31,8 +32,6 @@ const pageTitle = computed(() => {
 </script>
 
 <template>
-  <Toaster position="top-right" rich-colors close-button />
-
   <!-- Not authenticated: just render the page (login) -->
   <div v-if="!showSidebar" class="h-screen bg-background text-foreground">
     <RouterView />
@@ -56,4 +55,6 @@ const pageTitle = computed(() => {
     <!-- Global question create/import dialog (works from any page) -->
     <QuestionDialog />
   </SidebarProvider>
+
+  <Toaster position="top-right" :visible-toasts="5" rich-colors close-button theme="light" />
 </template>

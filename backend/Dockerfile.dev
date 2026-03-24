@@ -11,5 +11,5 @@ COPY . .
 
 EXPOSE 3000
 
-# tsx watch restarts on file changes
+# Generate migrations & start dev server
 CMD ["yarn", "dev"]

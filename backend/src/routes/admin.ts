@@ -509,6 +509,27 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
               min_app_version: { type: ['string', 'null'] },
               app_store_url: { type: ['string', 'null'] },
               play_store_url: { type: ['string', 'null'] },
+              // Gameplay
+              free_daily_matches: { type: 'integer', minimum: 1, maximum: 100 },
+              round_count: { type: 'integer', minimum: 1, maximum: 20 },
+              timer_seconds: { type: 'integer', minimum: 5, maximum: 60 },
+              bonus_round_enabled: { type: 'boolean' },
+              matchmaking_timeout_seconds: { type: 'integer', minimum: 5, maximum: 120 },
+              // Scoring
+              points_per_round: { type: 'integer', minimum: 0 },
+              points_bonus_round: { type: 'integer', minimum: 0 },
+              speed_weight: { type: 'number', minimum: 0, maximum: 1 },
+              base_weight: { type: 'number', minimum: 0, maximum: 1 },
+              min_correct_points: { type: 'integer', minimum: 0 },
+              // Progression
+              xp_base_match: { type: 'integer', minimum: 0 },
+              xp_win_bonus: { type: 'integer', minimum: 0 },
+              xp_perfect_bonus: { type: 'integer', minimum: 0 },
+              xp_streak_multiplier: { type: 'integer', minimum: 0 },
+              level_formula_divisor: { type: 'integer', minimum: 1 },
+              badge_thresholds: { type: 'object' },
+              // Texts
+              custom_texts: { type: 'object' },
             },
           },
         },
@@ -537,12 +558,31 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
           tournaments_enabled: 'tournamentsEnabled', friends_enabled: 'friendsEnabled',
           is_active: 'isActive', maintenance_message: 'maintenanceMessage',
           min_app_version: 'minAppVersion', app_store_url: 'appStoreUrl', play_store_url: 'playStoreUrl',
+          // Gameplay
+          free_daily_matches: 'freeDailyMatches', round_count: 'roundCount',
+          timer_seconds: 'timerSeconds', bonus_round_enabled: 'bonusRoundEnabled',
+          matchmaking_timeout_seconds: 'matchmakingTimeoutSeconds',
+          // Scoring
+          points_per_round: 'pointsPerRound', points_bonus_round: 'pointsBonusRound',
+          speed_weight: 'speedWeight', base_weight: 'baseWeight',
+          min_correct_points: 'minCorrectPoints',
+          // Progression
+          xp_base_match: 'xpBaseMatch', xp_win_bonus: 'xpWinBonus',
+          xp_perfect_bonus: 'xpPerfectBonus', xp_streak_multiplier: 'xpStreakMultiplier',
+          level_formula_divisor: 'levelFormulaDivisor', badge_thresholds: 'badgeThresholds',
+          // Texts
+          custom_texts: 'customTexts',
         };
 
         const updateData: Record<string, unknown> = {};
         for (const [bodyKey, schemaKey] of Object.entries(fieldMap)) {
           if (body[bodyKey] !== undefined) {
-            updateData[schemaKey] = body[bodyKey];
+            // speed_weight & base_weight are stored as varchar
+            if (bodyKey === 'speed_weight' || bodyKey === 'base_weight') {
+              updateData[schemaKey] = String(body[bodyKey]);
+            } else {
+              updateData[schemaKey] = body[bodyKey];
+            }
           }
         }
 

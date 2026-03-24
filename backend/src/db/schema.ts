@@ -45,6 +45,31 @@ export const appFlavors = pgTable('app_flavors', {
   appStoreUrl: varchar('app_store_url', { length: 500 }),
   playStoreUrl: varchar('play_store_url', { length: 500 }),
 
+  // Gameplay
+  freeDailyMatches: integer('free_daily_matches').default(5),
+  roundCount: integer('round_count').default(7),
+  timerSeconds: integer('timer_seconds').default(10),
+  bonusRoundEnabled: boolean('bonus_round_enabled').default(true),
+  matchmakingTimeoutSeconds: integer('matchmaking_timeout_seconds').default(15),
+
+  // Scoring
+  pointsPerRound: integer('points_per_round').default(20),
+  pointsBonusRound: integer('points_bonus_round').default(40),
+  speedWeight: varchar('speed_weight', { length: 10 }).default('0.6'),
+  baseWeight: varchar('base_weight', { length: 10 }).default('0.4'),
+  minCorrectPoints: integer('min_correct_points').default(5),
+
+  // Progression
+  xpBaseMatch: integer('xp_base_match').default(50),
+  xpWinBonus: integer('xp_win_bonus').default(25),
+  xpPerfectBonus: integer('xp_perfect_bonus').default(50),
+  xpStreakMultiplier: integer('xp_streak_multiplier').default(5),
+  levelFormulaDivisor: integer('level_formula_divisor').default(100),
+  badgeThresholds: jsonb('badge_thresholds').default({ bronze: 10, silver: 25, gold: 50, expert: 100, grand_master: 200 }),
+
+  // Texts
+  customTexts: jsonb('custom_texts').default({}),
+
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });

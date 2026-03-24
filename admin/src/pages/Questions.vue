@@ -27,10 +27,14 @@ import {
 } from '@/components/ui/select'
 import SelectSearch from '@/components/ui/select/SelectSearch.vue'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Pencil, Trash2, Plus, Minus } from 'lucide-vue-next'
+import { Pencil, Trash2, Plus, Minus, Check, Eye, BarChart3, Tag, Layers, BookOpen, Calendar } from 'lucide-vue-next'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+} from '@/components/ui/sheet'
+import { Separator } from '@/components/ui/separator'
 
 const toast = useToast()
 const queryClient = useQueryClient()
@@ -220,6 +224,31 @@ function categoryName(id: string) {
   return categories.value.find(c => c.id === id)?.name ?? '–'
 }
 
+// ── Detail Sidebar ──
+const showDetail = ref(false)
+const detailQuestion = ref<QuestionRow | null>(null)
+
+function openDetail(row: Record<string, unknown>, event: MouseEvent) {
+  // Don't open sidebar if clicking on interactive elements (buttons, switches, checkboxes, dropdowns)
+  const target = event.target as HTMLElement
+  if (target.closest('button, [role="checkbox"], [role="switch"], [data-slot="switch"]')) return
+  detailQuestion.value = row as unknown as QuestionRow
+  showDetail.value = true
+}
+
+function parentCategory(categoryId: string) {
+  const cat = categories.value.find(c => c.id === categoryId)
+  if (!cat || !cat.parent_id) return null
+  return categories.value.find(c => c.id === cat.parent_id) ?? null
+}
+
+function formatDate(dateStr: string | null | undefined) {
+  if (!dateStr) return '–'
+  return new Date(dateStr).toLocaleDateString('fr-FR', {
+    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
 // ── TanStack columns ──
 const columns: ColumnDef<QuestionRow, unknown>[] = [
   {
@@ -313,7 +342,9 @@ interface QuestionRow {
   times_correct: number
   is_active: boolean
   is_verified: boolean
+  created_at?: string
   category_name?: string
+  category_slug?: string
   flavor_slugs?: string[]
 }
 interface CategoryRow {
@@ -373,6 +404,7 @@ interface CategoryRow {
       :server-page="currentPage"
       :server-page-count="pageCount"
       @update:server-page="currentPage = $event"
+      @row-click="openDetail"
     >
       <template #filters>
           <Select v-model="filterFlavor">
@@ -504,5 +536,183 @@ interface CategoryRow {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    <!-- ══ Detail Sidebar (Sheet) ══ -->
+    <Sheet v-model:open="showDetail">
+      <SheetContent side="right" class="sm:max-w-xl w-full overflow-y-auto p-6">
+        <SheetHeader>
+          <SheetTitle>Détail de la question</SheetTitle>
+          <SheetDescription>Toutes les informations liées à cette question</SheetDescription>
+        </SheetHeader>
+
+        <template v-if="detailQuestion">
+          <div class="space-y-6 pt-4">
+            <!-- Question text -->
+            <div class="space-y-2">
+              <div class="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <BookOpen class="h-4 w-4" />
+                Question
+              </div>
+              <p class="text-base leading-relaxed">{{ detailQuestion.question_text }}</p>
+            </div>
+
+            <Separator />
+
+            <!-- Answers -->
+            <div class="space-y-2">
+              <div class="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <Layers class="h-4 w-4" />
+                Réponses
+              </div>
+              <div class="space-y-2">
+                <div
+                  v-for="(answer, i) in detailQuestion.answers"
+                  :key="i"
+                  class="flex items-start gap-3 rounded-lg border px-3 py-2.5 text-sm"
+                  :class="i === detailQuestion.correct_index
+                    ? 'border-green-500/50 bg-green-500/5'
+                    : 'border-border'"
+                >
+                  <span
+                    class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                    :class="i === detailQuestion.correct_index
+                      ? 'bg-green-500 text-white'
+                      : 'bg-muted text-muted-foreground'"
+                  >
+                    {{ String.fromCharCode(65 + i) }}
+                  </span>
+                  <span class="flex-1 pt-0.5">{{ answer }}</span>
+                  <Check v-if="i === detailQuestion.correct_index" class="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <!-- Metadata grid -->
+            <div class="grid grid-cols-2 gap-4">
+              <!-- Category -->
+              <div class="space-y-1">
+                <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Tag class="h-3.5 w-3.5" />
+                  Catégorie
+                </div>
+                <div>
+                  <template v-if="parentCategory(detailQuestion.category_id)">
+                    <Badge variant="outline" class="text-xs">{{ parentCategory(detailQuestion.category_id)!.name }}</Badge>
+                    <span class="text-muted-foreground mx-1">›</span>
+                  </template>
+                  <Badge variant="secondary" class="text-xs">{{ detailQuestion.category_name ?? categoryName(detailQuestion.category_id) }}</Badge>
+                </div>
+              </div>
+
+              <!-- Difficulty -->
+              <div class="space-y-1">
+                <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <BarChart3 class="h-3.5 w-3.5" />
+                  Difficulté
+                </div>
+                <span
+                  class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                  :class="difficultyColor(detailQuestion.difficulty)"
+                >{{ difficultyLabel(detailQuestion.difficulty) }}</span>
+              </div>
+
+              <!-- Times played -->
+              <div class="space-y-1">
+                <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Eye class="h-3.5 w-3.5" />
+                  Fois jouée
+                </div>
+                <p class="text-sm font-medium">{{ detailQuestion.times_played }}</p>
+              </div>
+
+              <!-- Success rate -->
+              <div class="space-y-1">
+                <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <BarChart3 class="h-3.5 w-3.5" />
+                  Taux de réussite
+                </div>
+                <p class="text-sm font-medium">{{ successRate(detailQuestion.times_played, detailQuestion.times_correct) }}</p>
+              </div>
+
+              <!-- Verified -->
+              <div class="space-y-1">
+                <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Check class="h-3.5 w-3.5" />
+                  Vérifiée
+                </div>
+                <Badge :variant="detailQuestion.is_verified ? 'default' : 'outline'" class="text-xs">
+                  {{ detailQuestion.is_verified ? 'Oui' : 'Non' }}
+                </Badge>
+              </div>
+
+              <!-- Created at -->
+              <div class="space-y-1">
+                <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Calendar class="h-3.5 w-3.5" />
+                  Créée le
+                </div>
+                <p class="text-sm">{{ formatDate(detailQuestion.created_at) }}</p>
+              </div>
+            </div>
+
+            <Separator />
+
+            <!-- Apps -->
+            <div class="space-y-2">
+              <div class="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <Tag class="h-4 w-4" />
+                Applications
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <template v-if="(detailQuestion.flavor_slugs ?? []).length > 0">
+                  <span
+                    v-for="s in detailQuestion.flavor_slugs"
+                    :key="s"
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold text-white"
+                    :style="{ backgroundColor: FLAVORS.find(f => f.slug === s)?.color ?? '#666' }"
+                  >
+                    {{ FLAVORS.find(f => f.slug === s)?.label ?? s }}
+                  </span>
+                </template>
+                <span v-else class="text-sm text-muted-foreground italic">Aucune application associée</span>
+              </div>
+            </div>
+
+            <!-- Explanation -->
+            <template v-if="detailQuestion.explanation">
+              <Separator />
+              <div class="space-y-2">
+                <div class="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <BookOpen class="h-4 w-4" />
+                  Explication
+                </div>
+                <p class="text-sm leading-relaxed text-muted-foreground bg-muted/50 rounded-lg p-3">
+                  {{ detailQuestion.explanation }}
+                </p>
+              </div>
+            </template>
+
+            <!-- ID -->
+            <Separator />
+            <div class="space-y-1">
+              <div class="text-xs font-medium text-muted-foreground">ID</div>
+              <p class="text-xs text-muted-foreground font-mono select-all">{{ detailQuestion.id }}</p>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex gap-2 pt-2">
+              <Button size="sm" @click="showDetail = false; openEdit(detailQuestion!)">
+                <Pencil class="h-4 w-4 mr-1" /> Modifier
+              </Button>
+              <Button size="sm" variant="destructive" @click="showDetail = false; openDelete(detailQuestion!.id)">
+                <Trash2 class="h-4 w-4 mr-1" /> Supprimer
+              </Button>
+            </div>
+          </div>
+        </template>
+      </SheetContent>
+    </Sheet>
   </div>
 </template>

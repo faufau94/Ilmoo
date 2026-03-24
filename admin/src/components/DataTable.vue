@@ -38,6 +38,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'update:serverPage': [page: number]
+  'row-click': [row: TData, event: MouseEvent]
 }>()
 
 const isServerPaginated = computed(() => props.serverPage !== undefined)
@@ -157,7 +158,13 @@ const resultCount = computed(() =>
                 Aucun résultat
               </TableCell>
             </TableRow>
-            <TableRow v-else v-for="row in table.getRowModel().rows" :key="row.id">
+            <TableRow
+              v-else
+              v-for="row in table.getRowModel().rows"
+              :key="row.id"
+              class="cursor-pointer"
+              @click="(e: MouseEvent) => emit('row-click', row.original, e)"
+            >
               <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id">
                 <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
               </TableCell>

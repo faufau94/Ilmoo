@@ -1,55 +1,23 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { query, getOne, transaction } from '../db/queries.js';
+import { eq, and, isNull, sql, ne } from 'drizzle-orm';
+import { db, categories, questions } from '../db/index.js';
 import { requireAdmin } from '../middleware/admin.js';
 
-interface CategoryRow {
-  id: string;
-  name: string;
-  slug: string;
-  parent_id: string | null;
-  description: string | null;
-  icon_name: string;
-  color: string;
-  sort_order: number;
-  is_active: boolean;
-  is_premium: boolean;
-  is_thematic: boolean;
-  question_count: number;
-  match_count: number;
-  created_at: string;
-  updated_at: string;
-  subcategories_count?: number;
-}
-
-interface CreateCategoryBody {
-  name: string;
-  slug: string;
-  parent_id?: string;
-  description?: string;
-  icon_name: string;
-  color: string;
-  sort_order?: number;
-  is_premium?: boolean;
-  is_thematic?: boolean;
-}
-
 const categoriesRoutes: FastifyPluginAsync = async (fastify) => {
-  // ════════════════════════════════════════
   // GET /api/categories — root categories
-  // ════════════════════════════════════════
   fastify.get<{ Querystring: { all?: string } }>('/api/categories', async (request) => {
     const showAll = request.query.all === 'true';
 
-    const result = await query<CategoryRow & { subcategories_count: string; question_count: string }>(
-      `SELECT c.*,
-        (SELECT COUNT(*) FROM categories sub WHERE sub.parent_id = c.id ${showAll ? '' : 'AND sub.is_active = true'}) as subcategories_count,
+    const result = await db.execute(sql`
+      SELECT c.*,
+        (SELECT COUNT(*) FROM categories sub WHERE sub.parent_id = c.id ${showAll ? sql`` : sql`AND sub.is_active = true`}) as subcategories_count,
         (SELECT COUNT(*) FROM questions q WHERE q.category_id = c.id AND q.is_active = true) as question_count
-       FROM categories c
-       WHERE c.parent_id IS NULL ${showAll ? '' : 'AND c.is_active = true'}
-       ORDER BY c.sort_order, c.name`,
-    );
+      FROM categories c
+      WHERE c.parent_id IS NULL ${showAll ? sql`` : sql`AND c.is_active = true`}
+      ORDER BY c.sort_order, c.name
+    `);
 
-    const data = result.rows.map((row) => ({
+    const data = result.rows.map((row: Record<string, unknown>) => ({
       ...row,
       subcategories_count: Number(row.subcategories_count),
       question_count: Number(row.question_count),
@@ -58,9 +26,7 @@ const categoriesRoutes: FastifyPluginAsync = async (fastify) => {
     return { success: true, data };
   });
 
-  // ════════════════════════════════════════
   // GET /api/categories/:slug — detail with subcategories
-  // ════════════════════════════════════════
   fastify.get<{ Params: { slug: string } }>(
     '/api/categories/:slug',
     {
@@ -68,48 +34,39 @@ const categoriesRoutes: FastifyPluginAsync = async (fastify) => {
         params: {
           type: 'object' as const,
           required: ['slug'],
-          properties: {
-            slug: { type: 'string', minLength: 1, maxLength: 100 },
-          },
+          properties: { slug: { type: 'string', minLength: 1, maxLength: 100 } },
         },
       },
     },
     async (request, reply) => {
-      const category = await getOne<CategoryRow>(
-        `SELECT c.*,
+      const rows = await db.execute(sql`
+        SELECT c.*,
           (SELECT COUNT(*) FROM questions q WHERE q.category_id = c.id AND q.is_active = true) as question_count
-         FROM categories c WHERE c.slug = $1 AND c.is_active = true`,
-        [request.params.slug],
-      );
+        FROM categories c WHERE c.slug = ${request.params.slug} AND c.is_active = true
+      `);
+      const category = rows.rows[0] as Record<string, unknown> | undefined;
 
       if (!category) {
         return reply.status(404).send({ success: false, error: 'Category not found' });
       }
 
-      // If root category, include subcategories
-      let subcategories: CategoryRow[] = [];
+      let subcategories: Record<string, unknown>[] = [];
       if (!category.parent_id) {
-        const subResult = await query<CategoryRow>(
-          `SELECT c.*,
+        const subResult = await db.execute(sql`
+          SELECT c.*,
             (SELECT COUNT(*) FROM questions q WHERE q.category_id = c.id AND q.is_active = true) as question_count
-           FROM categories c
-           WHERE c.parent_id = $1 AND c.is_active = true
-           ORDER BY c.sort_order, c.name`,
-          [category.id],
-        );
-        subcategories = subResult.rows;
+          FROM categories c
+          WHERE c.parent_id = ${category.id as string} AND c.is_active = true
+          ORDER BY c.sort_order, c.name
+        `);
+        subcategories = subResult.rows as Record<string, unknown>[];
       }
 
-      return {
-        success: true,
-        data: { ...category, subcategories },
-      };
+      return { success: true, data: { ...category, subcategories } };
     },
   );
 
-  // ════════════════════════════════════════
   // GET /api/categories/:slug/subcategories
-  // ════════════════════════════════════════
   fastify.get<{ Params: { slug: string } }>(
     '/api/categories/:slug/subcategories',
     {
@@ -117,37 +74,40 @@ const categoriesRoutes: FastifyPluginAsync = async (fastify) => {
         params: {
           type: 'object' as const,
           required: ['slug'],
-          properties: {
-            slug: { type: 'string', minLength: 1, maxLength: 100 },
-          },
+          properties: { slug: { type: 'string', minLength: 1, maxLength: 100 } },
         },
       },
     },
     async (request, reply) => {
-      const parent = await getOne<CategoryRow>(
-        `SELECT id FROM categories WHERE slug = $1 AND is_active = true`,
-        [request.params.slug],
-      );
+      const parent = await db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(and(eq(categories.slug, request.params.slug), eq(categories.isActive, true)))
+        .limit(1)
+        .then((r) => r[0] ?? null);
 
       if (!parent) {
         return reply.status(404).send({ success: false, error: 'Category not found' });
       }
 
-      const result = await query<CategoryRow>(
-        `SELECT * FROM categories
-         WHERE parent_id = $1 AND is_active = true
-         ORDER BY sort_order, name`,
-        [parent.id],
-      );
+      const result = await db
+        .select()
+        .from(categories)
+        .where(and(eq(categories.parentId, parent.id), eq(categories.isActive, true)))
+        .orderBy(categories.sortOrder, categories.name);
 
-      return { success: true, data: result.rows };
+      return { success: true, data: result };
     },
   );
 
-  // ════════════════════════════════════════
   // POST /api/categories — admin only
-  // ════════════════════════════════════════
-  fastify.post<{ Body: CreateCategoryBody }>(
+  fastify.post<{
+    Body: {
+      name: string; slug: string; parent_id?: string; description?: string;
+      icon_name: string; color: string; sort_order?: number;
+      is_premium?: boolean; is_thematic?: boolean;
+    };
+  }>(
     '/api/categories',
     {
       preHandler: requireAdmin,
@@ -173,16 +133,17 @@ const categoriesRoutes: FastifyPluginAsync = async (fastify) => {
       const { name, slug, parent_id, description, icon_name, color, sort_order, is_premium, is_thematic } =
         request.body;
 
-      // If parent_id provided, verify it exists and is a root category
       if (parent_id) {
-        const parent = await getOne<CategoryRow>(
-          'SELECT id, parent_id FROM categories WHERE id = $1',
-          [parent_id],
-        );
+        const parent = await db
+          .select({ id: categories.id, parentId: categories.parentId })
+          .from(categories)
+          .where(eq(categories.id, parent_id))
+          .limit(1)
+          .then((r) => r[0] ?? null);
         if (!parent) {
           return reply.status(400).send({ success: false, error: 'Parent category not found' });
         }
-        if (parent.parent_id) {
+        if (parent.parentId) {
           return reply.status(400).send({
             success: false,
             error: 'Cannot nest more than 2 levels (parent is already a subcategory)',
@@ -190,30 +151,37 @@ const categoriesRoutes: FastifyPluginAsync = async (fastify) => {
         }
       }
 
-      // Check slug uniqueness
-      const existing = await getOne('SELECT id FROM categories WHERE slug = $1', [slug]);
+      const existing = await db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(eq(categories.slug, slug))
+        .limit(1)
+        .then((r) => r[0] ?? null);
       if (existing) {
         return reply.status(409).send({ success: false, error: 'Slug already exists' });
       }
 
-      const category = await getOne<CategoryRow>(
-        `INSERT INTO categories (name, slug, parent_id, description, icon_name, color, sort_order, is_premium, is_thematic)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING *`,
-        [
-          name, slug, parent_id || null, description || null,
-          icon_name, color, sort_order ?? 0, is_premium ?? false, is_thematic ?? false,
-        ],
-      );
+      const inserted = await db
+        .insert(categories)
+        .values({
+          name, slug, parentId: parent_id ?? null, description: description ?? null,
+          iconName: icon_name, color, sortOrder: sort_order ?? 0,
+          isPremium: is_premium ?? false, isThematic: is_thematic ?? false,
+        })
+        .returning();
 
-      return reply.status(201).send({ success: true, data: category });
+      return reply.status(201).send({ success: true, data: inserted[0] });
     },
   );
 
-  // ════════════════════════════════════════
   // PUT /api/categories/:id — admin only
-  // ════════════════════════════════════════
-  fastify.put<{ Params: { id: string }; Body: Partial<CreateCategoryBody> & { is_active?: boolean } }>(
+  fastify.put<{
+    Params: { id: string };
+    Body: Partial<{
+      name: string; slug: string; description: string; icon_name: string;
+      color: string; sort_order: number; is_premium: boolean; is_thematic: boolean; is_active: boolean;
+    }>;
+  }>(
     '/api/categories/:id',
     {
       preHandler: requireAdmin,
@@ -243,59 +211,54 @@ const categoriesRoutes: FastifyPluginAsync = async (fastify) => {
       const { id } = request.params;
       const body = request.body;
 
-      const existing = await getOne<CategoryRow>('SELECT * FROM categories WHERE id = $1', [id]);
+      const existing = await db
+        .select()
+        .from(categories)
+        .where(eq(categories.id, id))
+        .limit(1)
+        .then((r) => r[0] ?? null);
       if (!existing) {
         return reply.status(404).send({ success: false, error: 'Category not found' });
       }
 
-      // Check slug uniqueness if changing
       if (body.slug && body.slug !== existing.slug) {
-        const slugExists = await getOne('SELECT id FROM categories WHERE slug = $1 AND id != $2', [body.slug, id]);
+        const slugExists = await db
+          .select({ id: categories.id })
+          .from(categories)
+          .where(and(eq(categories.slug, body.slug), ne(categories.id, id)))
+          .limit(1)
+          .then((r) => r[0] ?? null);
         if (slugExists) {
           return reply.status(409).send({ success: false, error: 'Slug already exists' });
         }
       }
 
-      const sets: string[] = [];
-      const params: unknown[] = [];
-      let paramIndex = 1;
+      const updateData: Record<string, unknown> = {};
+      if (body.name !== undefined) updateData.name = body.name;
+      if (body.slug !== undefined) updateData.slug = body.slug;
+      if (body.description !== undefined) updateData.description = body.description;
+      if (body.icon_name !== undefined) updateData.iconName = body.icon_name;
+      if (body.color !== undefined) updateData.color = body.color;
+      if (body.sort_order !== undefined) updateData.sortOrder = body.sort_order;
+      if (body.is_premium !== undefined) updateData.isPremium = body.is_premium;
+      if (body.is_thematic !== undefined) updateData.isThematic = body.is_thematic;
+      if (body.is_active !== undefined) updateData.isActive = body.is_active;
 
-      const fields: [string, unknown][] = [
-        ['name', body.name],
-        ['slug', body.slug],
-        ['description', body.description],
-        ['icon_name', body.icon_name],
-        ['color', body.color],
-        ['sort_order', body.sort_order],
-        ['is_premium', body.is_premium],
-        ['is_thematic', body.is_thematic],
-        ['is_active', body.is_active],
-      ];
-
-      for (const [col, val] of fields) {
-        if (val !== undefined) {
-          sets.push(`${col} = $${paramIndex++}`);
-          params.push(val);
-        }
-      }
-
-      if (sets.length === 0) {
+      if (Object.keys(updateData).length === 0) {
         return reply.status(400).send({ success: false, error: 'No fields to update' });
       }
 
-      params.push(id);
-      const updated = await getOne<CategoryRow>(
-        `UPDATE categories SET ${sets.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-        params,
-      );
+      const updated = await db
+        .update(categories)
+        .set(updateData)
+        .where(eq(categories.id, id))
+        .returning();
 
-      return { success: true, data: updated };
+      return { success: true, data: updated[0] };
     },
   );
 
-  // ════════════════════════════════════════
   // DELETE /api/categories/:id — admin only (CASCADE)
-  // ════════════════════════════════════════
   fastify.delete<{ Params: { id: string } }>(
     '/api/categories/:id',
     {
@@ -311,13 +274,17 @@ const categoriesRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { id } = request.params;
 
-      const category = await getOne<CategoryRow>('SELECT * FROM categories WHERE id = $1', [id]);
+      const category = await db
+        .select()
+        .from(categories)
+        .where(eq(categories.id, id))
+        .limit(1)
+        .then((r) => r[0] ?? null);
       if (!category) {
         return reply.status(404).send({ success: false, error: 'Category not found' });
       }
 
-      // CASCADE: subcategories are deleted by the FK constraint
-      await query('DELETE FROM categories WHERE id = $1', [id]);
+      await db.delete(categories).where(eq(categories.id, id));
 
       return { success: true, data: { deleted: true } };
     },

@@ -1,7 +1,7 @@
 import type { preHandlerHookHandler } from 'fastify';
 
 export const requireLinked: preHandlerHookHandler = async (request, reply) => {
-  if (request.user.is_anonymous) {
+  if (request.user.isAnonymous) {
     return reply.status(403).send({
       success: false,
       error: 'account_link_required',

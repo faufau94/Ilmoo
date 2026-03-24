@@ -1,6 +1,5 @@
 /**
  * Master seed runner — executes all seed scripts in order.
- * Add new seeds to the list below, no need to touch Docker config.
  *
  * Run with: npx tsx src/db/seed.ts
  */
@@ -10,8 +9,9 @@ import { readdirSync } from 'node:fs';
 
 const dir = resolve(import.meta.dirname);
 
-// Seeds run in this order. Each file must be self-contained (its own pool).
+// Seeds run in this exact order first
 const seeds = [
+  'seed-flavors.ts',
   'seed-admin.ts',
   'seed-categories.ts',
 ];

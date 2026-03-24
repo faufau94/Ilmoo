@@ -6,9 +6,9 @@ import { config as dotenvConfig } from 'dotenv';
 import { resolve } from 'node:path';
 dotenvConfig({ path: resolve(import.meta.dirname, '../../../.env') });
 import bcrypt from 'bcrypt';
-import { Pool } from 'pg';
-
-const pool = new Pool({ connectionString: process.env['DATABASE_URL'] });
+import { db, users } from './index.js';
+import { sql } from 'drizzle-orm';
+import pool from './connection.js';
 
 async function seedAdmin() {
   const email = process.env['ADMIN_EMAIL'];
@@ -22,16 +22,15 @@ async function seedAdmin() {
   const passwordHash = await bcrypt.hash(password, 12);
 
   // Upsert: create or update the admin account
-  const result = await pool.query(
-    `INSERT INTO users (firebase_uid, email, username, role, is_anonymous, password_hash)
-     VALUES ($1, $2, $3, 'admin', false, $4)
-     ON CONFLICT (firebase_uid) DO UPDATE SET
-       email = EXCLUDED.email,
-       password_hash = EXCLUDED.password_hash,
-       role = 'admin'
-     RETURNING id, email, role`,
-    [`admin-${email}`, email, 'Admin', passwordHash],
-  );
+  const result = await db.execute(sql`
+    INSERT INTO users (firebase_uid, email, username, role, is_anonymous, password_hash)
+    VALUES (${`admin-${email}`}, ${email}, ${'Admin'}, 'admin', false, ${passwordHash})
+    ON CONFLICT (firebase_uid) DO UPDATE SET
+      email = EXCLUDED.email,
+      password_hash = EXCLUDED.password_hash,
+      role = 'admin'
+    RETURNING id, email, role
+  `);
 
   console.log('Admin account ready:', result.rows[0]);
   await pool.end();

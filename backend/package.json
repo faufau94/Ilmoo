@@ -12,7 +12,11 @@
     "test:watch": "vitest",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
@@ -21,6 +25,7 @@
     "@sentry/node": "^10.45.0",
     "bcrypt": "^6.0.0",
     "dotenv": "^17.3.1",
+    "drizzle-orm": "^0.45.1",
     "fastify": "^5.8.2",
     "fastify-plugin": "^5.1.0",
     "firebase-admin": "^13.7.0",
@@ -33,6 +38,7 @@
     "@types/node": "^25.5.0",
     "@types/pg": "^8.18.0",
     "@vitest/coverage-v8": "^4.1.0",
+    "drizzle-kit": "^0.31.10",
     "socket.io-client": "^4.8.3",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",

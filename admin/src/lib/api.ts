@@ -109,10 +109,10 @@ export async function deleteQuestion(id: string) {
   return request(`/api/questions/${id}`, { method: 'DELETE' })
 }
 
-export async function importQuestions(questions: Record<string, unknown>[]) {
+export async function importQuestions(questions: Record<string, unknown>[], flavorIds?: string[]) {
   return request('/api/questions/import', {
     method: 'POST',
-    body: JSON.stringify({ questions }),
+    body: JSON.stringify({ questions, flavor_ids: flavorIds }),
   })
 }
 

@@ -5,9 +5,9 @@
 import { config as dotenvConfig } from 'dotenv';
 import { resolve } from 'node:path';
 dotenvConfig({ path: resolve(import.meta.dirname, '../../../.env') });
-import { Pool } from 'pg';
-
-const pool = new Pool({ connectionString: process.env['DATABASE_URL'] });
+import { db } from './index.js';
+import { sql } from 'drizzle-orm';
+import pool from './connection.js';
 
 interface Category {
   name: string;
@@ -227,34 +227,31 @@ async function seed() {
   for (let i = 0; i < categories.length; i++) {
     const cat = categories[i]!;
 
-    // Upsert root category
-    const result = await pool.query(
-      `INSERT INTO categories (name, slug, icon_name, color, sort_order, parent_id)
-       VALUES ($1, $2, $3, $4, $5, NULL)
-       ON CONFLICT (slug) DO UPDATE SET
-         name = EXCLUDED.name, icon_name = EXCLUDED.icon_name,
-         color = EXCLUDED.color, sort_order = EXCLUDED.sort_order
-       RETURNING id`,
-      [cat.name, cat.slug, cat.icon_name, cat.color, i],
-    );
+    const result = await db.execute(sql`
+      INSERT INTO categories (name, slug, icon_name, color, sort_order, parent_id)
+      VALUES (${cat.name}, ${cat.slug}, ${cat.icon_name}, ${cat.color}, ${i}, NULL)
+      ON CONFLICT (slug) DO UPDATE SET
+        name = EXCLUDED.name, icon_name = EXCLUDED.icon_name,
+        color = EXCLUDED.color, sort_order = EXCLUDED.sort_order
+      RETURNING id
+    `);
 
-    const parentId = result.rows[0].id;
+    const parentId = (result.rows[0] as { id: string }).id;
     rootCount++;
     console.log(`✓ ${cat.name} (${cat.subcategories.length} sous-catégories)`);
 
     for (let j = 0; j < cat.subcategories.length; j++) {
       const sub = cat.subcategories[j]!;
 
-      await pool.query(
-        `INSERT INTO categories (name, slug, icon_name, color, sort_order, parent_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (slug) DO UPDATE SET
-           name = EXCLUDED.name, icon_name = EXCLUDED.icon_name,
-           color = EXCLUDED.color, sort_order = EXCLUDED.sort_order,
-           parent_id = EXCLUDED.parent_id
-         RETURNING id`,
-        [sub.name, sub.slug, sub.icon_name, cat.color, j, parentId],
-      );
+      await db.execute(sql`
+        INSERT INTO categories (name, slug, icon_name, color, sort_order, parent_id)
+        VALUES (${sub.name}, ${sub.slug}, ${sub.icon_name}, ${cat.color}, ${j}, ${parentId})
+        ON CONFLICT (slug) DO UPDATE SET
+          name = EXCLUDED.name, icon_name = EXCLUDED.icon_name,
+          color = EXCLUDED.color, sort_order = EXCLUDED.sort_order,
+          parent_id = EXCLUDED.parent_id
+        RETURNING id
+      `);
       subCount++;
     }
   }

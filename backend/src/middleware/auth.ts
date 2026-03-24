@@ -1,30 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
 import fp from 'fastify-plugin';
+import { eq, and, gt } from 'drizzle-orm';
 import { verifyToken } from '../services/firebase.js';
-import { getOne } from '../db/queries.js';
+import { db, users, adminSessions } from '../db/index.js';
 
-export interface UserRow {
-  id: string;
-  firebase_uid: string;
-  username: string | null;
-  email: string | null;
-  role: 'player' | 'admin';
-  status: 'active' | 'suspended' | 'banned';
-  subscription: 'free' | 'premium' | 'expired';
-  is_anonymous: boolean;
-  app_flavor: string | null;
-  total_matches: number;
-  total_wins: number;
-  total_xp: number;
-  level: number;
-  win_streak: number;
-  best_streak: number;
-  daily_matches: number;
-  last_match_date: string | null;
-  created_at: string;
-  updated_at: string;
-  last_login_at: string | null;
-}
+export type UserRow = typeof users.$inferSelect;
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -36,7 +16,6 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.decorateRequest('user', null as unknown as UserRow);
 
   fastify.addHook('onRequest', async (request, reply) => {
-    // Skip public routes (match on Fastify route pattern, not raw URL)
     const routePath = request.routeOptions.url;
     if (routePath === '/health' || routePath === '/api/config/:flavorSlug' || routePath === '/api/admin/login') {
       return;
@@ -53,21 +32,23 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
     const token = authHeader.slice(7);
 
     // Try admin session token first (for backoffice)
-    const adminSession = await getOne<{ user_id: string }>(
-      `SELECT user_id FROM admin_sessions WHERE token = $1 AND expires_at > NOW()`,
-      [token],
-    );
+    const adminSession = await db
+      .select({ userId: adminSessions.userId })
+      .from(adminSessions)
+      .where(and(eq(adminSessions.token, token), gt(adminSessions.expiresAt, new Date())))
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
 
     let user: UserRow | null = null;
 
     if (adminSession) {
-      // Admin session token — look up admin user
-      user = await getOne<UserRow>(
-        'SELECT * FROM users WHERE id = $1',
-        [adminSession.user_id],
-      );
+      user = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, adminSession.userId))
+        .limit(1)
+        .then((rows) => rows[0] ?? null);
     } else {
-      // Firebase token — verify with Firebase Admin SDK
       let firebaseUid: string;
       try {
         const decoded = await verifyToken(token);
@@ -79,42 +60,34 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      user = await getOne<UserRow>(
-        'SELECT * FROM users WHERE firebase_uid = $1',
-        [firebaseUid],
-      );
+      user = await db
+        .select()
+        .from(users)
+        .where(eq(users.firebaseUid, firebaseUid))
+        .limit(1)
+        .then((rows) => rows[0] ?? null);
 
       if (!user) {
-        // First connection — auto-create anonymous account
         const appFlavor = (request.headers['x-app-flavor'] as string) || null;
 
-        user = await getOne<UserRow>(
-          `INSERT INTO users (firebase_uid, is_anonymous, app_flavor, last_login_at)
-           VALUES ($1, true, $2, NOW())
-           RETURNING *`,
-          [firebaseUid, appFlavor],
-        );
+        const inserted = await db
+          .insert(users)
+          .values({ firebaseUid, isAnonymous: true, appFlavor, lastLoginAt: new Date() })
+          .returning();
+        user = inserted[0]!;
       } else {
-        // Update last_login_at
-        await getOne(
-          'UPDATE users SET last_login_at = NOW() WHERE id = $1',
-          [user.id],
-        );
+        await db
+          .update(users)
+          .set({ lastLoginAt: new Date() })
+          .where(eq(users.id, user.id));
       }
     }
 
-    // Block banned/suspended accounts
     if (user!.status === 'banned') {
-      return reply.status(403).send({
-        success: false,
-        error: 'Account banned',
-      });
+      return reply.status(403).send({ success: false, error: 'Account banned' });
     }
     if (user!.status === 'suspended') {
-      return reply.status(403).send({
-        success: false,
-        error: 'Account suspended',
-      });
+      return reply.status(403).send({ success: false, error: 'Account suspended' });
     }
 
     request.user = user!;

@@ -1,67 +1,19 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { query, getOne, transaction } from '../db/queries.js';
+import { eq, and, sql, inArray, notInArray } from 'drizzle-orm';
+import { db, questions, categories, questionFlavors, userSeenQuestions } from '../db/index.js';
 import { requireAdmin } from '../middleware/admin.js';
-
-interface QuestionRow {
-  id: string;
-  category_id: string;
-  question_text: string;
-  answers: string[];
-  correct_index: number;
-  difficulty: 'easy' | 'medium' | 'hard';
-  explanation: string | null;
-  times_played: number;
-  times_correct: number;
-  is_active: boolean;
-  is_verified: boolean;
-  submitted_by: string | null;
-  created_at: string;
-  updated_at: string;
-  category_name?: string;
-  category_slug?: string;
-}
-
-// ── GET /api/questions ──
-// List questions with pagination and filters
-interface ListQuery {
-  categoryId?: string;
-  difficulty?: 'easy' | 'medium' | 'hard';
-  search?: string;
-  isVerified?: string;       // 'true' | 'false'
-  minPlayed?: string;        // filtre times_played >= n
-  maxSuccessRate?: string;   // filtre taux réussite <= n (%)
-  minSuccessRate?: string;   // filtre taux réussite >= n (%)
-  limit?: string;
-  offset?: string;
-}
-
-// ── GET /api/questions/random ──
-interface RandomQuery {
-  categoryId: string;
-  count?: string;
-  userId?: string;
-}
-
-// ── POST /api/questions ──
-interface CreateBody {
-  question_text: string;
-  answers: string[];
-  correct_index: number;
-  category_id: string;
-  difficulty?: 'easy' | 'medium' | 'hard';
-  explanation?: string;
-}
-
-// ── POST /api/questions/import ──
-interface ImportBody {
-  questions: CreateBody[];
-}
 
 const questionsRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // GET /api/questions — paginated list
   // ════════════════════════════════════════
-  fastify.get<{ Querystring: ListQuery }>(
+  fastify.get<{
+    Querystring: {
+      categoryId?: string; difficulty?: string; search?: string;
+      isVerified?: string; minPlayed?: string; minSuccessRate?: string;
+      maxSuccessRate?: string; limit?: string; offset?: string;
+    };
+  }>(
     '/api/questions',
     {
       schema: {
@@ -90,70 +42,38 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
       const limit = Math.min(Number(rawLimit) || 20, 500);
       const offset = Number(rawOffset) || 0;
 
-      const conditions: string[] = ['q.is_active = true'];
-      const params: unknown[] = [];
-      let paramIndex = 1;
+      // Build dynamic conditions using raw SQL (complex filters with dynamic params)
+      const conditions: ReturnType<typeof sql>[] = [sql`q.is_active = true`];
+      if (categoryId) conditions.push(sql`q.category_id = ${categoryId}`);
+      if (difficulty) conditions.push(sql`q.difficulty = ${difficulty}`);
+      if (search) conditions.push(sql`(q.question_text ILIKE ${`%${search}%`} OR q.answers::text ILIKE ${`%${search}%`})`);
+      if (isVerified !== undefined) conditions.push(sql`q.is_verified = ${isVerified === 'true'}`);
+      if (minPlayed) conditions.push(sql`q.times_played >= ${Number(minPlayed)}`);
+      if (minSuccessRate) conditions.push(sql`(q.times_played = 0 OR ROUND(q.times_correct::numeric / q.times_played * 100) >= ${Number(minSuccessRate)})`);
+      if (maxSuccessRate) conditions.push(sql`(q.times_played > 0 AND ROUND(q.times_correct::numeric / q.times_played * 100) <= ${Number(maxSuccessRate)})`);
 
-      if (categoryId) {
-        conditions.push(`q.category_id = $${paramIndex++}`);
-        params.push(categoryId);
-      }
-      if (difficulty) {
-        conditions.push(`q.difficulty = $${paramIndex++}`);
-        params.push(difficulty);
-      }
-      if (search) {
-        conditions.push(`(q.question_text ILIKE $${paramIndex} OR q.answers::text ILIKE $${paramIndex})`);
-        params.push(`%${search}%`);
-        paramIndex++;
-      }
-      if (isVerified !== undefined) {
-        conditions.push(`q.is_verified = $${paramIndex++}`);
-        params.push(isVerified === 'true');
-      }
-      if (minPlayed) {
-        conditions.push(`q.times_played >= $${paramIndex++}`);
-        params.push(Number(minPlayed));
-      }
-      if (minSuccessRate) {
-        conditions.push(`(q.times_played = 0 OR ROUND(q.times_correct::numeric / q.times_played * 100) >= $${paramIndex++})`);
-        params.push(Number(minSuccessRate));
-      }
-      if (maxSuccessRate) {
-        conditions.push(`(q.times_played > 0 AND ROUND(q.times_correct::numeric / q.times_played * 100) <= $${paramIndex++})`);
-        params.push(Number(maxSuccessRate));
-      }
+      const where = sql.join(conditions, sql` AND `);
 
-      const where = conditions.join(' AND ');
+      const countResult = await db.execute(sql`SELECT COUNT(*) as total FROM questions q WHERE ${where}`);
+      const total = Number((countResult.rows[0] as Record<string, unknown>)?.total ?? 0);
 
-      const countResult = await query(
-        `SELECT COUNT(*) as total FROM questions q WHERE ${where}`,
-        params,
-      );
-      const total = Number(countResult.rows[0]?.total ?? 0);
+      const result = await db.execute(sql`
+        SELECT q.*, c.name as category_name, c.slug as category_slug
+        FROM questions q
+        JOIN categories c ON c.id = q.category_id
+        WHERE ${where}
+        ORDER BY q.created_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `);
 
-      const result = await query<QuestionRow>(
-        `SELECT q.*, c.name as category_name, c.slug as category_slug
-         FROM questions q
-         JOIN categories c ON c.id = q.category_id
-         WHERE ${where}
-         ORDER BY q.created_at DESC
-         LIMIT $${paramIndex++} OFFSET $${paramIndex++}`,
-        [...params, limit, offset],
-      );
-
-      return {
-        success: true,
-        data: result.rows,
-        pagination: { total, limit, offset },
-      };
+      return { success: true, data: result.rows, pagination: { total, limit, offset } };
     },
   );
 
   // ════════════════════════════════════════
   // GET /api/questions/random
   // ════════════════════════════════════════
-  fastify.get<{ Querystring: RandomQuery }>(
+  fastify.get<{ Querystring: { categoryId: string; count?: string; userId?: string } }>(
     '/api/questions/random',
     {
       schema: {
@@ -172,82 +92,62 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
       const { categoryId, count: rawCount, userId } = request.query;
       const count = Math.min(Number(rawCount) || 7, 20);
 
-      // Check if this is a root category with subcategories
-      const subcategories = await query(
-        `SELECT id FROM categories WHERE parent_id = $1 AND is_active = true`,
-        [categoryId],
-      );
+      // Check for subcategories
+      const subcats = await db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(and(eq(categories.parentId, categoryId), eq(categories.isActive, true)));
 
-      // Build category filter: root → all subcategories, leaf → just this one
-      let categoryFilter: string;
-      const categoryIds: string[] = [];
+      const categoryIds = subcats.length > 0
+        ? [categoryId, ...subcats.map((r) => r.id)]
+        : [categoryId];
 
-      if (subcategories.rows.length > 0) {
-        // Root category: include the root + all its subcategories
-        categoryIds.push(categoryId, ...subcategories.rows.map((r) => r.id as string));
-        const placeholders = categoryIds.map((_, i) => `$${i + 1}`).join(', ');
-        categoryFilter = `q.category_id IN (${placeholders})`;
-      } else {
-        // Leaf category (or root with no subcategories)
-        categoryIds.push(categoryId);
-        categoryFilter = `q.category_id = $1`;
-      }
+      let result;
 
-      const baseParamCount = categoryIds.length;
-
-      // Try to exclude already-seen questions for this user
-      let questions;
       if (userId) {
-        questions = await query<QuestionRow>(
-          `SELECT q.*
-           FROM questions q
-           WHERE ${categoryFilter}
-             AND q.is_active = true
-             AND q.id NOT IN (
-               SELECT question_id FROM user_seen_questions WHERE user_id = $${baseParamCount + 1}
-             )
-           ORDER BY RANDOM()
-           LIMIT $${baseParamCount + 2}`,
-          [...categoryIds, userId, count],
-        );
+        result = await db.execute(sql`
+          SELECT q.*
+          FROM questions q
+          WHERE q.category_id = ANY(${categoryIds})
+            AND q.is_active = true
+            AND q.id NOT IN (
+              SELECT question_id FROM user_seen_questions WHERE user_id = ${userId}
+            )
+          ORDER BY RANDOM()
+          LIMIT ${count}
+        `);
 
-        // Not enough unseen questions → reset and re-pick
-        if (questions.rows.length < count) {
-          await query(
-            `DELETE FROM user_seen_questions
-             WHERE user_id = $1
-               AND question_id IN (
-                 SELECT id FROM questions WHERE ${categoryFilter.replace(/\$(\d+)/g, (_, n) => `$${Number(n) + 1}`)}
-               )`,
-            [userId, ...categoryIds],
-          );
+        if (result.rows.length < count) {
+          // Reset seen questions for this user + categories
+          await db.execute(sql`
+            DELETE FROM user_seen_questions
+            WHERE user_id = ${userId}
+              AND question_id IN (
+                SELECT id FROM questions WHERE category_id = ANY(${categoryIds})
+              )
+          `);
 
-          questions = await query<QuestionRow>(
-            `SELECT q.*
-             FROM questions q
-             WHERE ${categoryFilter}
-               AND q.is_active = true
-             ORDER BY RANDOM()
-             LIMIT $${baseParamCount + 1}`,
-            [...categoryIds, count],
-          );
+          result = await db.execute(sql`
+            SELECT q.*
+            FROM questions q
+            WHERE q.category_id = ANY(${categoryIds})
+              AND q.is_active = true
+            ORDER BY RANDOM()
+            LIMIT ${count}
+          `);
         }
       } else {
-        questions = await query<QuestionRow>(
-          `SELECT q.*
-           FROM questions q
-           WHERE ${categoryFilter}
-             AND q.is_active = true
-           ORDER BY RANDOM()
-           LIMIT $${baseParamCount + 1}`,
-          [...categoryIds, count],
-        );
+        result = await db.execute(sql`
+          SELECT q.*
+          FROM questions q
+          WHERE q.category_id = ANY(${categoryIds})
+            AND q.is_active = true
+          ORDER BY RANDOM()
+          LIMIT ${count}
+        `);
       }
 
-      return {
-        success: true,
-        data: questions.rows,
-      };
+      return { success: true, data: result.rows };
     },
   );
 
@@ -261,20 +161,18 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
         params: {
           type: 'object' as const,
           required: ['id'],
-          properties: {
-            id: { type: 'string', format: 'uuid' },
-          },
+          properties: { id: { type: 'string', format: 'uuid' } },
         },
       },
     },
     async (request, reply) => {
-      const question = await getOne<QuestionRow>(
-        `SELECT q.*, c.name as category_name, c.slug as category_slug
-         FROM questions q
-         JOIN categories c ON c.id = q.category_id
-         WHERE q.id = $1 AND q.is_active = true`,
-        [request.params.id],
-      );
+      const result = await db.execute(sql`
+        SELECT q.*, c.name as category_name, c.slug as category_slug
+        FROM questions q
+        JOIN categories c ON c.id = q.category_id
+        WHERE q.id = ${request.params.id} AND q.is_active = true
+      `);
+      const question = result.rows[0];
 
       if (!question) {
         return reply.status(404).send({ success: false, error: 'Question not found' });
@@ -287,7 +185,13 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // POST /api/questions — admin only
   // ════════════════════════════════════════
-  fastify.post<{ Body: CreateBody }>(
+  fastify.post<{
+    Body: {
+      question_text: string; answers: string[]; correct_index: number;
+      category_id: string; difficulty?: string; explanation?: string;
+      flavor_ids?: string[];
+    };
+  }>(
     '/api/questions',
     {
       preHandler: requireAdmin,
@@ -297,45 +201,58 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
           required: ['question_text', 'answers', 'correct_index', 'category_id'],
           properties: {
             question_text: { type: 'string', minLength: 1 },
-            answers: {
-              type: 'array',
-              items: { type: 'string', minLength: 1 },
-              minItems: 4,
-              maxItems: 4,
-            },
+            answers: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 4, maxItems: 4 },
             correct_index: { type: 'integer', minimum: 0, maximum: 3 },
             category_id: { type: 'string', format: 'uuid' },
             difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] },
             explanation: { type: 'string' },
+            flavor_ids: { type: 'array', items: { type: 'string' } },
           },
         },
       },
     },
     async (request, reply) => {
-      const { question_text, answers, correct_index, category_id, difficulty, explanation } =
+      const { question_text, answers, correct_index, category_id, difficulty, explanation, flavor_ids } =
         request.body;
 
-      // Verify category exists
-      const category = await getOne('SELECT id FROM categories WHERE id = $1', [category_id]);
+      const category = await db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(eq(categories.id, category_id))
+        .limit(1)
+        .then((r) => r[0] ?? null);
       if (!category) {
         return reply.status(400).send({ success: false, error: 'Category not found' });
       }
 
-      const question = await transaction(async (client) => {
-        const result = await client.query<QuestionRow>(
-          `INSERT INTO questions (question_text, answers, correct_index, category_id, difficulty, explanation)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING *`,
-          [question_text, JSON.stringify(answers), correct_index, category_id, difficulty || 'medium', explanation || null],
-        );
+      const question = await db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(questions)
+          .values({
+            questionText: question_text,
+            answers,
+            correctIndex: correct_index,
+            categoryId: category_id,
+            difficulty: (difficulty as 'easy' | 'medium' | 'hard') || 'medium',
+            explanation: explanation ?? null,
+          })
+          .returning();
 
-        // Increment category question_count
-        await client.query(
-          `UPDATE categories SET question_count = question_count + 1 WHERE id = $1`,
-          [category_id],
-        );
+        const newQuestion = inserted[0]!;
 
-        return result.rows[0]!;
+        await tx
+          .update(categories)
+          .set({ questionCount: sql`${categories.questionCount} + 1` })
+          .where(eq(categories.id, category_id));
+
+        if (flavor_ids && flavor_ids.length > 0) {
+          await tx
+            .insert(questionFlavors)
+            .values(flavor_ids.map((slug) => ({ questionId: newQuestion.id, flavorSlug: slug })))
+            .onConflictDoNothing();
+        }
+
+        return newQuestion;
       });
 
       return reply.status(201).send({ success: true, data: question });
@@ -345,7 +262,14 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // PUT /api/questions/:id — admin only
   // ════════════════════════════════════════
-  fastify.put<{ Params: { id: string }; Body: Partial<CreateBody> & { is_verified?: boolean } }>(
+  fastify.put<{
+    Params: { id: string };
+    Body: Partial<{
+      question_text: string; answers: string[]; correct_index: number;
+      category_id: string; difficulty: string; explanation: string;
+      is_verified: boolean; flavor_ids: string[];
+    }>;
+  }>(
     '/api/questions/:id',
     {
       preHandler: requireAdmin,
@@ -359,17 +283,13 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
           type: 'object' as const,
           properties: {
             question_text: { type: 'string', minLength: 1 },
-            answers: {
-              type: 'array',
-              items: { type: 'string', minLength: 1 },
-              minItems: 4,
-              maxItems: 4,
-            },
+            answers: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 4, maxItems: 4 },
             correct_index: { type: 'integer', minimum: 0, maximum: 3 },
             category_id: { type: 'string', format: 'uuid' },
             difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] },
             explanation: { type: 'string' },
             is_verified: { type: 'boolean' },
+            flavor_ids: { type: 'array', items: { type: 'string' } },
           },
         },
       },
@@ -378,76 +298,68 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
       const { id } = request.params;
       const body = request.body;
 
-      // Check question exists
-      const existing = await getOne<QuestionRow>(
-        'SELECT * FROM questions WHERE id = $1 AND is_active = true',
-        [id],
-      );
+      const existing = await db
+        .select()
+        .from(questions)
+        .where(and(eq(questions.id, id), eq(questions.isActive, true)))
+        .limit(1)
+        .then((r) => r[0] ?? null);
       if (!existing) {
         return reply.status(404).send({ success: false, error: 'Question not found' });
       }
 
-      // Build dynamic SET clause
-      const sets: string[] = [];
-      const params: unknown[] = [];
-      let paramIndex = 1;
+      const updateData: Record<string, unknown> = {};
+      if (body.question_text !== undefined) updateData.questionText = body.question_text;
+      if (body.answers !== undefined) updateData.answers = body.answers;
+      if (body.correct_index !== undefined) updateData.correctIndex = body.correct_index;
+      if (body.difficulty !== undefined) updateData.difficulty = body.difficulty;
+      if (body.explanation !== undefined) updateData.explanation = body.explanation;
+      if (body.is_verified !== undefined) updateData.isVerified = body.is_verified;
 
-      if (body.question_text !== undefined) {
-        sets.push(`question_text = $${paramIndex++}`);
-        params.push(body.question_text);
-      }
-      if (body.answers !== undefined) {
-        sets.push(`answers = $${paramIndex++}`);
-        params.push(JSON.stringify(body.answers));
-      }
-      if (body.correct_index !== undefined) {
-        sets.push(`correct_index = $${paramIndex++}`);
-        params.push(body.correct_index);
-      }
-      if (body.difficulty !== undefined) {
-        sets.push(`difficulty = $${paramIndex++}`);
-        params.push(body.difficulty);
-      }
-      if (body.explanation !== undefined) {
-        sets.push(`explanation = $${paramIndex++}`);
-        params.push(body.explanation);
-      }
-      if (body.is_verified !== undefined) {
-        sets.push(`is_verified = $${paramIndex++}`);
-        params.push(body.is_verified);
-      }
-
-      // Handle category change: update question_count on both categories
-      if (body.category_id !== undefined && body.category_id !== existing.category_id) {
-        const newCategory = await getOne('SELECT id FROM categories WHERE id = $1', [body.category_id]);
+      // Handle category change
+      if (body.category_id !== undefined && body.category_id !== existing.categoryId) {
+        const newCategory = await db
+          .select({ id: categories.id })
+          .from(categories)
+          .where(eq(categories.id, body.category_id))
+          .limit(1)
+          .then((r) => r[0] ?? null);
         if (!newCategory) {
           return reply.status(400).send({ success: false, error: 'Category not found' });
         }
 
-        sets.push(`category_id = $${paramIndex++}`);
-        params.push(body.category_id);
+        updateData.categoryId = body.category_id;
 
-        await transaction(async (client) => {
-          await client.query(
-            `UPDATE categories SET question_count = question_count - 1 WHERE id = $1`,
-            [existing.category_id],
-          );
-          await client.query(
-            `UPDATE categories SET question_count = question_count + 1 WHERE id = $1`,
-            [body.category_id],
-          );
+        await db.transaction(async (tx) => {
+          await tx.update(categories).set({ questionCount: sql`${categories.questionCount} - 1` }).where(eq(categories.id, existing.categoryId));
+          await tx.update(categories).set({ questionCount: sql`${categories.questionCount} + 1` }).where(eq(categories.id, body.category_id!));
         });
       }
 
-      if (sets.length === 0) {
+      if (Object.keys(updateData).length === 0 && body.flavor_ids === undefined) {
         return reply.status(400).send({ success: false, error: 'No fields to update' });
       }
 
-      params.push(id);
-      const updated = await getOne<QuestionRow>(
-        `UPDATE questions SET ${sets.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
-        params,
-      );
+      let updated = existing;
+      if (Object.keys(updateData).length > 0) {
+        const result = await db
+          .update(questions)
+          .set(updateData)
+          .where(eq(questions.id, id))
+          .returning();
+        updated = result[0]!;
+      }
+
+      // Handle flavor_ids update
+      if (body.flavor_ids !== undefined) {
+        await db.delete(questionFlavors).where(eq(questionFlavors.questionId, id));
+        if (body.flavor_ids.length > 0) {
+          await db
+            .insert(questionFlavors)
+            .values(body.flavor_ids.map((slug) => ({ questionId: id, flavorSlug: slug })))
+            .onConflictDoNothing();
+        }
+      }
 
       return { success: true, data: updated };
     },
@@ -471,23 +383,19 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { id } = request.params;
 
-      const question = await getOne<QuestionRow>(
-        'SELECT * FROM questions WHERE id = $1 AND is_active = true',
-        [id],
-      );
+      const question = await db
+        .select()
+        .from(questions)
+        .where(and(eq(questions.id, id), eq(questions.isActive, true)))
+        .limit(1)
+        .then((r) => r[0] ?? null);
       if (!question) {
         return reply.status(404).send({ success: false, error: 'Question not found' });
       }
 
-      await transaction(async (client) => {
-        await client.query(
-          `UPDATE questions SET is_active = false WHERE id = $1`,
-          [id],
-        );
-        await client.query(
-          `UPDATE categories SET question_count = question_count - 1 WHERE id = $1`,
-          [question.category_id],
-        );
+      await db.transaction(async (tx) => {
+        await tx.update(questions).set({ isActive: false }).where(eq(questions.id, id));
+        await tx.update(categories).set({ questionCount: sql`${categories.questionCount} - 1` }).where(eq(categories.id, question.categoryId));
       });
 
       return { success: true, data: { deleted: true } };
@@ -497,7 +405,15 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
   // ════════════════════════════════════════
   // POST /api/questions/import — admin only (batch JSON)
   // ════════════════════════════════════════
-  fastify.post<{ Body: ImportBody }>(
+  fastify.post<{
+    Body: {
+      questions: {
+        question_text: string; answers: string[]; correct_index: number;
+        category_id: string; difficulty?: string; explanation?: string;
+      }[];
+      flavor_ids?: string[];
+    };
+  }>(
     '/api/questions/import',
     {
       preHandler: requireAdmin,
@@ -507,20 +423,13 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
           required: ['questions'],
           properties: {
             questions: {
-              type: 'array',
-              minItems: 1,
-              maxItems: 500,
+              type: 'array', minItems: 1, maxItems: 500,
               items: {
                 type: 'object' as const,
                 required: ['question_text', 'answers', 'correct_index', 'category_id'],
                 properties: {
                   question_text: { type: 'string', minLength: 1 },
-                  answers: {
-                    type: 'array',
-                    items: { type: 'string', minLength: 1 },
-                    minItems: 4,
-                    maxItems: 4,
-                  },
+                  answers: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 4, maxItems: 4 },
                   correct_index: { type: 'integer', minimum: 0, maximum: 3 },
                   category_id: { type: 'string', format: 'uuid' },
                   difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] },
@@ -528,29 +437,29 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
                 },
               },
             },
+            flavor_ids: { type: 'array', items: { type: 'string' } },
           },
         },
       },
     },
     async (request) => {
-      const { questions } = request.body;
+      const { questions: questionsData, flavor_ids } = request.body;
       const errors: { index: number; error: string }[] = [];
       let imported = 0;
 
-      // Collect all category IDs to validate upfront
-      const categoryIds = [...new Set(questions.map((q) => q.category_id))];
-      const existingCategories = await query(
-        `SELECT id FROM categories WHERE id = ANY($1)`,
-        [categoryIds],
-      );
-      const validCategoryIds = new Set(existingCategories.rows.map((r) => r.id as string));
+      // Validate categories upfront
+      const categoryIds = [...new Set(questionsData.map((q) => q.category_id))];
+      const existingCats = await db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(inArray(categories.id, categoryIds));
+      const validCategoryIds = new Set(existingCats.map((r) => r.id));
 
-      // Count how many questions per category will be added
       const categoryCountMap = new Map<string, number>();
 
-      await transaction(async (client) => {
-        for (let i = 0; i < questions.length; i++) {
-          const q = questions[i]!;
+      await db.transaction(async (tx) => {
+        for (let i = 0; i < questionsData.length; i++) {
+          const q = questionsData[i]!;
 
           if (!validCategoryIds.has(q.category_id)) {
             errors.push({ index: i, error: `Category ${q.category_id} not found` });
@@ -558,31 +467,38 @@ const questionsRoutes: FastifyPluginAsync = async (fastify) => {
           }
 
           try {
-            await client.query(
-              `INSERT INTO questions (question_text, answers, correct_index, category_id, difficulty, explanation)
-               VALUES ($1, $2, $3, $4, $5, $6)`,
-              [
-                q.question_text,
-                JSON.stringify(q.answers),
-                q.correct_index,
-                q.category_id,
-                q.difficulty || 'medium',
-                q.explanation || null,
-              ],
-            );
+            const inserted = await tx
+              .insert(questions)
+              .values({
+                questionText: q.question_text,
+                answers: q.answers,
+                correctIndex: q.correct_index,
+                categoryId: q.category_id,
+                difficulty: (q.difficulty as 'easy' | 'medium' | 'hard') || 'medium',
+                explanation: q.explanation ?? null,
+              })
+              .returning({ id: questions.id });
+
+            const newId = inserted[0]!.id;
             imported++;
             categoryCountMap.set(q.category_id, (categoryCountMap.get(q.category_id) || 0) + 1);
+
+            if (flavor_ids && flavor_ids.length > 0) {
+              await tx
+                .insert(questionFlavors)
+                .values(flavor_ids.map((slug) => ({ questionId: newId, flavorSlug: slug })))
+                .onConflictDoNothing();
+            }
           } catch (err) {
             errors.push({ index: i, error: (err as Error).message });
           }
         }
 
-        // Update question_count for each affected category
         for (const [catId, count] of categoryCountMap) {
-          await client.query(
-            `UPDATE categories SET question_count = question_count + $1 WHERE id = $2`,
-            [count, catId],
-          );
+          await tx
+            .update(categories)
+            .set({ questionCount: sql`${categories.questionCount} + ${count}` })
+            .where(eq(categories.id, catId));
         }
       });
 

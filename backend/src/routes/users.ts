@@ -1,50 +1,26 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { query, getOne } from '../db/queries.js';
+import { eq, and, ne, desc, inArray, sql } from 'drizzle-orm';
+import { db, users, userCategoryStats, categories } from '../db/index.js';
 import { requireLinked } from '../middleware/requireLinked.js';
 import type { UserRow } from '../middleware/auth.js';
 
-interface UserCategoryStatRow {
-  category_id: string;
-  category_name: string;
-  matches_played: number;
-  matches_won: number;
-  xp: number;
-  badge: string;
-  correct_answers: number;
-  total_answers: number;
-}
-
 const usersRoutes: FastifyPluginAsync = async (fastify) => {
-  // ════════════════════════════════════════
-  // GET /api/users/me — my profile + stats
-  // ════════════════════════════════════════
+  // GET /api/users/me
   fastify.get('/api/users/me', async (request) => {
-    const user = request.user;
+    const u = request.user;
     return {
       success: true,
       data: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        status: user.status,
-        subscription: user.subscription,
-        is_anonymous: user.is_anonymous,
-        app_flavor: user.app_flavor,
-        total_matches: user.total_matches,
-        total_wins: user.total_wins,
-        total_xp: user.total_xp,
-        level: user.level,
-        win_streak: user.win_streak,
-        best_streak: user.best_streak,
-        created_at: user.created_at,
+        id: u.id, username: u.username, email: u.email, role: u.role,
+        status: u.status, subscription: u.subscription, is_anonymous: u.isAnonymous,
+        app_flavor: u.appFlavor, total_matches: u.totalMatches, total_wins: u.totalWins,
+        total_xp: u.totalXp, level: u.level, win_streak: u.winStreak,
+        best_streak: u.bestStreak, created_at: u.createdAt,
       },
     };
   });
 
-  // ════════════════════════════════════════
   // GET /api/users/:id — public profile
-  // ════════════════════════════════════════
   fastify.get<{ Params: { id: string } }>(
     '/api/users/:id',
     {
@@ -57,11 +33,17 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const user = await getOne<UserRow>(
-        `SELECT id, username, is_anonymous, total_matches, total_wins, total_xp, level, best_streak, created_at
-         FROM users WHERE id = $1 AND status = 'active'`,
-        [request.params.id],
-      );
+      const user = await db
+        .select({
+          id: users.id, username: users.username, isAnonymous: users.isAnonymous,
+          totalMatches: users.totalMatches, totalWins: users.totalWins,
+          totalXp: users.totalXp, level: users.level, bestStreak: users.bestStreak,
+          createdAt: users.createdAt,
+        })
+        .from(users)
+        .where(and(eq(users.id, request.params.id), eq(users.status, 'active')))
+        .limit(1)
+        .then((r) => r[0] ?? null);
 
       if (!user) {
         return reply.status(404).send({ success: false, error: 'User not found' });
@@ -71,9 +53,7 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
-  // ════════════════════════════════════════
-  // PUT /api/users/me — update username (linked only)
-  // ════════════════════════════════════════
+  // PUT /api/users/me — update username
   fastify.put<{ Body: { username: string } }>(
     '/api/users/me',
     {
@@ -91,27 +71,27 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { username } = request.body;
 
-      // Check uniqueness
-      const existing = await getOne(
-        'SELECT id FROM users WHERE username = $1 AND id != $2',
-        [username, request.user.id],
-      );
+      const existing = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.username, username), ne(users.id, request.user.id)))
+        .limit(1)
+        .then((r) => r[0] ?? null);
       if (existing) {
         return reply.status(409).send({ success: false, error: 'Username already taken' });
       }
 
-      const updated = await getOne<UserRow>(
-        `UPDATE users SET username = $1 WHERE id = $2 RETURNING *`,
-        [username, request.user.id],
-      );
+      const updated = await db
+        .update(users)
+        .set({ username })
+        .where(eq(users.id, request.user.id))
+        .returning();
 
-      return { success: true, data: updated };
+      return { success: true, data: updated[0] };
     },
   );
 
-  // ════════════════════════════════════════
   // PUT /api/users/me/fcm-token
-  // ════════════════════════════════════════
   fastify.put<{ Body: { fcm_token: string } }>(
     '/api/users/me/fcm-token',
     {
@@ -119,25 +99,20 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
         body: {
           type: 'object' as const,
           required: ['fcm_token'],
-          properties: {
-            fcm_token: { type: 'string', minLength: 1, maxLength: 500 },
-          },
+          properties: { fcm_token: { type: 'string', minLength: 1, maxLength: 500 } },
         },
       },
     },
     async (request) => {
-      await query(
-        `UPDATE users SET fcm_token = $1 WHERE id = $2`,
-        [request.body.fcm_token, request.user.id],
-      );
-
+      await db
+        .update(users)
+        .set({ fcmToken: request.body.fcm_token })
+        .where(eq(users.id, request.user.id));
       return { success: true, data: { updated: true } };
     },
   );
 
-  // ════════════════════════════════════════
-  // PUT /api/users/me/subscription (linked only)
-  // ════════════════════════════════════════
+  // PUT /api/users/me/subscription
   fastify.put<{ Body: { subscription: 'free' | 'premium' | 'expired' } }>(
     '/api/users/me/subscription',
     {
@@ -153,34 +128,36 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request) => {
-      await query(
-        `UPDATE users SET subscription = $1 WHERE id = $2`,
-        [request.body.subscription, request.user.id],
-      );
-
+      await db
+        .update(users)
+        .set({ subscription: request.body.subscription })
+        .where(eq(users.id, request.user.id));
       return { success: true, data: { updated: true } };
     },
   );
 
-  // ════════════════════════════════════════
-  // GET /api/users/me/stats — per-category stats
-  // ════════════════════════════════════════
+  // GET /api/users/me/stats
   fastify.get('/api/users/me/stats', async (request) => {
-    const result = await query<UserCategoryStatRow>(
-      `SELECT ucs.*, c.name as category_name
-       FROM user_category_stats ucs
-       JOIN categories c ON c.id = ucs.category_id
-       WHERE ucs.user_id = $1
-       ORDER BY ucs.xp DESC`,
-      [request.user.id],
-    );
+    const result = await db
+      .select({
+        categoryId: userCategoryStats.categoryId,
+        categoryName: categories.name,
+        matchesPlayed: userCategoryStats.matchesPlayed,
+        matchesWon: userCategoryStats.matchesWon,
+        xp: userCategoryStats.xp,
+        badge: userCategoryStats.badge,
+        correctAnswers: userCategoryStats.correctAnswers,
+        totalAnswers: userCategoryStats.totalAnswers,
+      })
+      .from(userCategoryStats)
+      .innerJoin(categories, eq(categories.id, userCategoryStats.categoryId))
+      .where(eq(userCategoryStats.userId, request.user.id))
+      .orderBy(desc(userCategoryStats.xp));
 
-    return { success: true, data: result.rows };
+    return { success: true, data: result };
   });
 
-  // ════════════════════════════════════════
   // GET /api/leaderboard
-  // ════════════════════════════════════════
   fastify.get<{
     Querystring: { categoryId?: string; period?: 'weekly' | 'alltime'; limit?: string };
   }>(
@@ -202,7 +179,7 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
       const limit = Math.min(Number(rawLimit) || 50, 100);
       const flavorSlug = (request.headers['x-app-flavor'] as string) || null;
 
-      // Try Redis leaderboard first for global rankings
+      // Try Redis first for global rankings
       if (!categoryId) {
         const scope = period === 'weekly' ? 'weekly' : 'global';
         const redisKey = flavorSlug
@@ -223,69 +200,58 @@ const usersRoutes: FastifyPluginAsync = async (fastify) => {
               });
             }
 
-            // Fetch user details for the IDs
             if (leaderboard.length > 0) {
               const userIds = leaderboard.map((l) => l.userId);
-              const users = await query<UserRow>(
-                `SELECT id, username, level, total_xp, is_anonymous
-                 FROM users
-                 WHERE id = ANY($1) AND is_anonymous = false AND status = 'active'`,
-                [userIds],
-              );
-              const userMap = new Map(users.rows.map((u) => [u.id, u]));
+              const userRows = await db
+                .select({
+                  id: users.id, username: users.username, level: users.level,
+                  totalXp: users.totalXp, isAnonymous: users.isAnonymous,
+                })
+                .from(users)
+                .where(and(
+                  inArray(users.id, userIds),
+                  eq(users.isAnonymous, false),
+                  eq(users.status, 'active'),
+                ));
+              const userMap = new Map(userRows.map((u) => [u.id, u]));
 
               const data = leaderboard
                 .filter((l) => userMap.has(l.userId))
-                .map((l, i) => ({
-                  rank: i + 1,
-                  ...userMap.get(l.userId),
-                  score: l.score,
-                }));
+                .map((l, i) => ({ rank: i + 1, ...userMap.get(l.userId), score: l.score }));
 
               return { success: true, data };
             }
           }
         } catch {
-          // Redis unavailable, fallback to PostgreSQL
+          // Redis unavailable, fallback
         }
       }
 
-      // Fallback: PostgreSQL query
+      // Fallback: PostgreSQL
       if (categoryId) {
-        // Per-category leaderboard
-        const result = await query(
-          `SELECT u.id, u.username, u.level, ucs.xp as score, u.is_anonymous
-           FROM user_category_stats ucs
-           JOIN users u ON u.id = ucs.user_id
-           WHERE ucs.category_id = $1
-             AND u.is_anonymous = false
-             AND u.status = 'active'
-           ORDER BY ucs.xp DESC
-           LIMIT $2`,
-          [categoryId, limit],
-        );
-
-        const data = result.rows.map((row, i) => ({ rank: i + 1, ...row }));
+        const result = await db.execute(sql`
+          SELECT u.id, u.username, u.level, ucs.xp as score, u.is_anonymous
+          FROM user_category_stats ucs
+          JOIN users u ON u.id = ucs.user_id
+          WHERE ucs.category_id = ${categoryId}
+            AND u.is_anonymous = false AND u.status = 'active'
+          ORDER BY ucs.xp DESC
+          LIMIT ${limit}
+        `);
+        const data = result.rows.map((row: Record<string, unknown>, i: number) => ({ rank: i + 1, ...row }));
         return { success: true, data };
       }
 
-      // Global leaderboard from PostgreSQL
-      const flavorCondition = flavorSlug ? `AND u.app_flavor = $2` : '';
-      const params: unknown[] = [limit];
-      if (flavorSlug) params.push(flavorSlug);
-
-      const result = await query(
-        `SELECT u.id, u.username, u.level, u.total_xp as score, u.is_anonymous
-         FROM users u
-         WHERE u.is_anonymous = false
-           AND u.status = 'active'
-           ${flavorCondition}
-         ORDER BY u.total_xp DESC
-         LIMIT $1`,
-        flavorSlug ? [limit, flavorSlug] : [limit],
-      );
-
-      const data = result.rows.map((row, i) => ({ rank: i + 1, ...row }));
+      // Global leaderboard
+      const result = await db.execute(sql`
+        SELECT u.id, u.username, u.level, u.total_xp as score, u.is_anonymous
+        FROM users u
+        WHERE u.is_anonymous = false AND u.status = 'active'
+          ${flavorSlug ? sql`AND u.app_flavor = ${flavorSlug}` : sql``}
+        ORDER BY u.total_xp DESC
+        LIMIT ${limit}
+      `);
+      const data = result.rows.map((row: Record<string, unknown>, i: number) => ({ rank: i + 1, ...row }));
       return { success: true, data };
     },
   );

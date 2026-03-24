@@ -179,6 +179,19 @@ CREATE INDEX idx_questions_difficulty ON questions(category_id, difficulty);
 CREATE INDEX idx_questions_active ON questions(is_active, is_verified);
 
 -- ══════════════════════════════════════════════
+-- QUESTION FLAVORS (liaison question ↔ app flavor)
+-- ══════════════════════════════════════════════
+
+CREATE TABLE question_flavors (
+    question_id     UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    flavor_slug     VARCHAR(50) NOT NULL REFERENCES app_flavors(slug) ON DELETE CASCADE,
+    PRIMARY KEY (question_id, flavor_slug)
+);
+
+CREATE INDEX idx_question_flavors_slug ON question_flavors(flavor_slug);
+CREATE INDEX idx_question_flavors_question ON question_flavors(question_id);
+
+-- ══════════════════════════════════════════════
 -- TOURNOIS (avant matchs car matches référence tournaments)
 -- ══════════════════════════════════════════════
 

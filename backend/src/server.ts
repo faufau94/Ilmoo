@@ -8,6 +8,9 @@ import { Server as SocketIOServer } from 'socket.io';
 import path from 'node:path';
 import { readdir } from 'node:fs/promises';
 import pool from './db/connection.js';
+import { db, appFlavors } from './db/index.js';
+import { eq } from 'drizzle-orm';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import redis, { cacheFlavorConfig, getFlavorConfig } from './services/redis.js';
 import { verifyToken } from './services/firebase.js';
 import authPlugin from './middleware/auth.js';
@@ -75,8 +78,8 @@ export async function buildApp(options?: { logger?: boolean }) {
   // ── Auth (Firebase token verification + user upsert) ──
   await fastify.register(authPlugin);
 
-  // ── Health check ──
-  fastify.get('/health', async () => {
+  // ── Health check (no logging to avoid spam from Docker healthcheck) ──
+  fastify.get('/health', { logLevel: 'silent' }, async () => {
     return { status: 'ok' };
   });
 
@@ -108,47 +111,40 @@ export async function buildApp(options?: { logger?: boolean }) {
         return { success: true, data: cached };
       }
 
-      // Query database
-      const result = await pool.query(
-        `SELECT
-          app_name, app_description, support_email,
-          primary_color, primary_dark, accent_positive, accent_negative,
-          enabled_category_ids,
-          ads_enabled, premium_enabled, tournaments_enabled, friends_enabled,
-          is_active, maintenance_message, min_app_version,
-          app_store_url, play_store_url
-        FROM app_flavors
-        WHERE slug = $1`,
-        [flavorSlug],
-      );
+      // Query database using Drizzle
+      const row = await db
+        .select({
+          appName: appFlavors.appName,
+          appDescription: appFlavors.appDescription,
+          supportEmail: appFlavors.supportEmail,
+          primaryColor: appFlavors.primaryColor,
+          primaryDark: appFlavors.primaryDark,
+          accentPositive: appFlavors.accentPositive,
+          accentNegative: appFlavors.accentNegative,
+          enabledCategoryIds: appFlavors.enabledCategoryIds,
+          adsEnabled: appFlavors.adsEnabled,
+          premiumEnabled: appFlavors.premiumEnabled,
+          tournamentsEnabled: appFlavors.tournamentsEnabled,
+          friendsEnabled: appFlavors.friendsEnabled,
+          isActive: appFlavors.isActive,
+          maintenanceMessage: appFlavors.maintenanceMessage,
+          minAppVersion: appFlavors.minAppVersion,
+          appStoreUrl: appFlavors.appStoreUrl,
+          playStoreUrl: appFlavors.playStoreUrl,
+        })
+        .from(appFlavors)
+        .where(eq(appFlavors.slug, flavorSlug))
+        .limit(1)
+        .then((rows) => rows[0] ?? null);
 
-      if (result.rows.length === 0) {
+      if (!row) {
         return reply.status(404).send({
           success: false,
           error: 'Flavor not found',
         });
       }
 
-      const row = result.rows[0]!;
-      const data = {
-        appName: row.app_name as string,
-        appDescription: row.app_description as string | null,
-        supportEmail: row.support_email as string | null,
-        primaryColor: row.primary_color as string,
-        primaryDark: row.primary_dark as string,
-        accentPositive: row.accent_positive as string,
-        accentNegative: row.accent_negative as string,
-        enabledCategoryIds: row.enabled_category_ids as string[] | null,
-        adsEnabled: row.ads_enabled as boolean,
-        premiumEnabled: row.premium_enabled as boolean,
-        tournamentsEnabled: row.tournaments_enabled as boolean,
-        friendsEnabled: row.friends_enabled as boolean,
-        isActive: row.is_active as boolean,
-        maintenanceMessage: row.maintenance_message as string | null,
-        minAppVersion: row.min_app_version as string | null,
-        appStoreUrl: row.app_store_url as string | null,
-        playStoreUrl: row.play_store_url as string | null,
-      };
+      const data = row;
 
       // Cache in Redis for 5 minutes
       await cacheFlavorConfig(flavorSlug, data);
@@ -179,6 +175,9 @@ export async function buildApp(options?: { logger?: boolean }) {
 // ── Start server (only when run directly, not imported by tests) ──
 const isMainModule = process.argv[1]?.includes('server');
 if (isMainModule) {
+  // Run pending Drizzle migrations before starting
+  await migrate(db, { migrationsFolder: './drizzle' });
+
   const { fastify } = await buildApp();
   const port = Number(process.env['PORT']) || 3000;
 
